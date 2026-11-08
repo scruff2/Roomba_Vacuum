@@ -31,7 +31,9 @@ const ERRORS = {
   112: 'Invalid charging load', 114: 'Internal battery failure', 115: 'Cell failure during charging',
   116: 'Charging error', 118: 'Battery communication failure', 119: 'Charging timeout',
   120: 'Battery not initialized', 122: 'Charging system error', 123: 'Battery not initialized',
-  216: 'Charging base bag full'
+  216: 'Charging base bag full',
+  // Seen when a room clean names a map version the robot won't accept (e.g. after the map was edited).
+  224: 'Map out of date for this room clean'
 };
 
 function errorText (code) { return code ? (ERRORS[code] || `Error ${code}`) : null; }

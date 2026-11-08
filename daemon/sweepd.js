@@ -320,11 +320,44 @@ route('DELETE', /^\/api\/rooms\/([\w-]+)$/, (req, body, [id]) => {
   return r;
 });
 route('POST', /^\/api\/rooms\/clean$/, (req, body) => cleanRoomList(body.rooms || []));
+// Wait briefly to see whether the robot set off or refused (error 224).
+function cleanOutcome (timeoutMs = 9000) {
+  return new Promise((resolve) => {
+    // The robot briefly reports a clean cycle while still docked even when it is
+    // about to refuse, so only count it as started once it leaves the charge phase.
+    const started = () => { const m = robot.state.cleanMissionStatus || {}; return m.cycle && m.cycle !== 'none' && m.phase !== 'charge'; };
+    const finish = (result) => { clearTimeout(t); robot.off('update', check); resolve(result); };
+    const check = () => { if (started()) finish('started'); };
+    const t = setTimeout(() => finish(started() ? 'started' : (robot.state.cleanMissionStatus || {}).error === 224 ? 'rejected' : 'unknown'), timeoutMs);
+    robot.on('update', check);
+  });
+}
+
+// The robot accepts only some map versions: after a clean it saves a newer
+// local version it rejects, but after a map edit in the iRobot app it wants
+// the new one. Try the version learned from the app first; if the robot
+// refuses with error 224, retry once with its latest and remember what worked.
 async function cleanRoomList (ids, label) {
-  const args = rooms.buildCleanArgs(roomStore(), robot.state.pmaps, ids, { ordered: true });
-  await robot.cleanRooms(args);
-  record('command', `${label ? `${label}: ` : ''}cleaning ${ids.map((id) => rooms.roomName(roomStore(), id)).join(' → ')}`, { rooms: ids });
-  return { ok: true, args };
+  const names = ids.map((id) => rooms.roomName(roomStore(), id)).join(' → ');
+  const store0 = roomStore();
+  const latest = rooms.currentVersion(robot.state.pmaps, store0.pmapId);
+  const versions = [...new Set([store0.version, latest].filter(Boolean))];
+  for (const [i, version] of versions.entries()) {
+    const args = { ...rooms.buildCleanArgs(store0, robot.state.pmaps, ids, { ordered: true }), user_pmapv_id: version };
+    await robot.cleanRooms(args);
+    const outcome = await cleanOutcome();
+    if (outcome !== 'rejected') {
+      if (version !== store0.version) {
+        store.set('rooms', { ...roomStore(), version });
+        record('rooms', `Map version updated to ${version}`);
+      }
+      record('command', `${label ? `${label}: ` : ''}cleaning ${names}`, { rooms: ids, version });
+      return { ok: true, args, outcome };
+    }
+    if (i < versions.length - 1) log.info(`room clean refused with map ${version}; retrying with ${versions[i + 1]}`);
+  }
+  record('error', `The robot refused to clean ${names} (error 224, map out of date). Start one room clean from the iRobot app so Sweep can learn the current map.`, { rooms: ids });
+  throw new Error('the robot refused (map out of date). Start one room clean from the iRobot app, then try again.');
 }
 route('GET', /^\/api\/routines$/, () => routines());
 route('POST', /^\/api\/routines$/, (req, body) => {
