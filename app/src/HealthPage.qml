@@ -57,6 +57,34 @@ ScrollView {
             ActionButton { text: qsTr("Refresh counters"); enabled: !page.refreshing && daemon.online; onClicked: page.refreshCounters() }
         }
 
+        Panel {
+            id: warningsPanel
+            title: qsTr("Early warnings")
+            Layout.fillWidth: true
+            property var warnings: []
+            function load() { daemon.get("/api/insights", (ok, d) => { if (ok) warningsPanel.warnings = d.warnings; }); }
+            Component.onCompleted: load()
+            onVisibleChanged: if (visible) load()
+            Label {
+                visible: warningsPanel.warnings.length === 0
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                color: Ui.good
+                text: qsTr("Nothing to worry about. Sweep compares recent missions with the robot's lifetime counters and warns when brushes stall more, it gets stuck more, charging contacts flicker, or the battery struggles.")
+            }
+            Repeater {
+                model: warningsPanel.warnings
+                ColumnLayout {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    spacing: 2
+                    Label { text: modelData.title; color: modelData.level === "warn" ? Ui.warn : Ui.text; font.weight: Font.DemiBold }
+                    Label { text: modelData.detail; color: Ui.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    Label { text: "→ " + modelData.advice; color: Ui.muted; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                }
+            }
+        }
+
         MaintenancePanel { Layout.fillWidth: true }
 
         GridLayout {

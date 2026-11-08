@@ -169,14 +169,20 @@ ScrollView {
                 }
 
                 Panel {
-                    title: qsTr("Maintenance due")
+                    id: attentionPanel
+                    title: qsTr("Needs attention")
                     Layout.fillWidth: true
-                    visible: (page.s.maintenanceDue || []).length > 0
+                    readonly property var warnings: (page.s.warnings || []).filter((w) => w.level === "warn")
+                    visible: (page.s.maintenanceDue || []).length > 0 || warnings.length > 0
+                    Repeater {
+                        model: attentionPanel.warnings
+                        Label { required property var modelData; text: "• " + modelData.title; color: Ui.warn; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    }
                     Repeater {
                         model: page.s.maintenanceDue || []
                         Label { required property var modelData; text: "• " + modelData.label; color: Ui.warn }
                     }
-                    ActionButton { text: qsTr("Open Health to mark done"); flat: true; onClicked: window.pageIndex = 5 }
+                    ActionButton { text: qsTr("Open Health"); flat: true; onClicked: window.pageIndex = 5 }
                 }
 
                 Panel {

@@ -19,8 +19,9 @@ const { Alerts } = require('./alerts');
 const describe = require('./describe');
 const rooms = require('./rooms');
 const maintenance = require('./maintenance');
+const insights = require('./insights');
 
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 const PORT = Number(process.env.SWEEP_PORT) || 8099;
 const CONFIG = process.env.SWEEP_CONFIG || path.join(os.homedir(), '.config', 'sweep', 'config.json');
 const DB = process.env.SWEEP_DB || path.join(os.homedir(), '.local', 'share', 'sweep', 'sweep.db');
@@ -57,6 +58,7 @@ function record (kind, message, data) {
   return e;
 }
 
+function safeWarnings () { try { return currentWarnings(); } catch (e) { return []; } }
 function roomStore () { return store.get('rooms', rooms.EMPTY); }
 function routines () { return store.get('routines', []); }
 function maintRecords () { return store.get('maintenance', {}); }
@@ -116,6 +118,7 @@ function statusPayload () {
     countersUpdated: robot.lastFullAt || null,
     rooms: roomStore().rooms.map((r) => ({ id: rooms.roomKey(r), type: r.type, name: r.name, passes: rooms.roomPasses(r) })),
     routines: routines(),
+    warnings: safeWarnings().map((w) => ({ key: w.key, level: w.level, title: w.title })),
     maintenanceDue: maintenance.status(maintRecords(), robot.state).filter((x) => x.due).map((x) => ({ key: x.key, label: x.label }))
   });
 }
@@ -152,6 +155,7 @@ async function finishMission (m) {
     checkMaintenance();
     store.saveMission(m);
   } catch (e) { log.error('counter refresh failed:', e.message); }
+  reviewAndFollowUp(m);
   broadcast('mission', missionSummary(m));
   const st = m.stats || {};
   const mins = m.missionMinutes || Math.round((m.end - m.start) / 60000);
@@ -160,7 +164,72 @@ async function finishMission (m) {
   if (st.bumps != null) parts.push(`${st.bumps} bumps`);
   if (m.batteryStart != null && m.batteryMin != null) parts.push(`battery ${m.batteryStart}% → ${m.batteryMin}%`);
   const title = m.result === 'completed' ? 'Cleaning finished' : m.result === 'error' ? 'Cleaning ended with an error' : 'Cleaning stopped';
-  alerts.send('finished', title, parts.join(' · '), { cooldownMs: 0 });
+  // A poor clean gets its own, more useful notification instead.
+  if (!(m.review && m.review.verdict === 'poor')) alerts.send('finished', title, parts.join(' · '), { cooldownMs: 0 });
+  checkWarnings();
+}
+
+// --- The "smarter brain": judge each clean, retry poor ones, watch for wear ---
+
+function reviewSettings () { return { autoRetry: false, ...store.get('review', {}) }; }
+let pendingRetryOf = null;
+
+function reviewAndFollowUp (m) {
+  if (!m.end) return;
+  const history = store.missions({ limit: 300 }).filter((x) => x.end && x.id !== m.id);
+  m.review = insights.reviewMission(m, history, { evacAllowed: robot.state.evacAllowed !== false });
+  store.saveMission(m);
+  if (m.review.verdict !== 'poor') return;
+  const where = (m.rooms || []).map((r) => r.name).join(', ') || 'the clean';
+  record('review', `Poor clean (${where}): ${m.review.reasons.join(' ')}`, { id: m.id });
+  alerts.send('review', `${where} wasn't cleaned well`, m.review.reasons[0] + (m.review.advice[0] ? ` ${m.review.advice[0]}` : ''), { cooldownMs: 0 });
+
+  // Optionally try once more with two passes, never for a retry itself.
+  const cfg = reviewSettings();
+  if (cfg.autoRetry && m.rooms && m.rooms.length && !m.retryOf && !inQuietHours(Date.now(), quiet())) {
+    pendingRetryOf = m.id;
+    setTimeout(() => {
+      cleanRoomList(m.rooms.map((r) => r.id), 'Retry with two passes', { passes: 'two' })
+        .catch((e) => { pendingRetryOf = null; record('review', `Couldn't retry ${where}: ${e.message}`); });
+    }, 60000);
+  }
+}
+
+// Review finished missions from before this feature existed.
+function backfillReviews () {
+  const all = store.missions({ limit: 1000 }).filter((x) => x.end).reverse();
+  const history = [];
+  for (const m of all) {
+    if (!m.review && m.stats) { m.review = insights.reviewMission(m, history); store.saveMission(m); }
+    history.push(m);
+  }
+}
+
+function currentWarnings () {
+  const since = Date.now() - 30 * 86400000;
+  const missions = store.missions({ limit: 500, since }).filter((x) => x.end);
+  const snapshots = [];
+  for (const m of missions) {
+    if (m.countersEnd) snapshots.push({ t: m.end, counters: m.countersEnd });
+    if (m.countersStart) snapshots.push({ t: m.start, counters: m.countersStart });
+  }
+  snapshots.sort((a, b) => b.t - a.t);
+  return insights.healthWarnings({ state: robot.state, missions, snapshots, samples: store.samples({ since: Date.now() - 86400000 }) });
+}
+
+// Notify about each warning at most once a week.
+function checkWarnings () {
+  try {
+    const sent = store.get('warningsNotified', {});
+    const now = Date.now();
+    for (const w of currentWarnings()) {
+      if (w.level !== 'warn' || (sent[w.key] && now - sent[w.key] < 7 * 86400000)) continue;
+      sent[w.key] = now;
+      record('health', `${w.title}: ${w.detail}`, { key: w.key });
+      alerts.send('health', w.title, `${w.detail} ${w.advice}`, { cooldownMs: 0 });
+    }
+    store.set('warningsNotified', sent);
+  } catch (e) { log.error('warning check failed:', e.message); }
 }
 
 robot.on('update', (reported, state) => {
@@ -168,6 +237,7 @@ robot.on('update', (reported, state) => {
   for (const ev of tracker.feed(state)) {
     const m = ev.mission;
     if (ev.type === 'start') {
+      if (pendingRetryOf) { m.retryOf = pendingRetryOf; pendingRetryOf = null; }
       // Remember which rooms were asked for, if this mission was a room clean.
       const asked = rooms.extractRooms(state.lastCommand);
       if (asked && Math.abs(asked.time * 1000 - m.start) < 5 * 60000) {
@@ -343,13 +413,14 @@ function cleanOutcome (timeoutMs = 10000) {
 // local version it rejects, but after a map edit in the iRobot app it wants
 // the new one. Try the version learned from the app first; if the robot
 // refuses with error 224, retry once with its latest and remember what worked.
-async function cleanRoomList (ids, label) {
+async function cleanRoomList (ids, label, { passes } = {}) {
   const names = ids.map((id) => rooms.roomName(roomStore(), id)).join(' → ');
   const store0 = roomStore();
   const latest = rooms.currentVersion(robot.state.pmaps, store0.pmapId);
   const versions = [...new Set([store0.version, latest].filter(Boolean))];
   for (const [i, version] of versions.entries()) {
     const args = { ...rooms.buildCleanArgs(store0, robot.state.pmaps, ids, { ordered: true }), user_pmapv_id: version };
+    if (passes) args.regions = args.regions.map((r) => ({ ...r, params: rooms.PASSES[passes] }));
     await robot.cleanRooms(args);
     const outcome = await cleanOutcome();
     if (outcome === 'ignored') {
@@ -400,6 +471,13 @@ route('POST', /^\/api\/routines\/([\w-]+)\/clean$/, async (req, body, [id]) => {
   const r = routines().find((x) => x.id === id);
   if (!r) throw Object.assign(new Error('unknown routine'), { status: 404 });
   return cleanRoomList(r.rooms, r.name);
+});
+route('GET', /^\/api\/insights$/, () => ({ warnings: currentWarnings(), review: reviewSettings() }));
+route('PUT', /^\/api\/review$/, (req, body) => {
+  const next = { ...reviewSettings(), autoRetry: !!body.autoRetry };
+  store.set('review', next);
+  record('review', next.autoRetry ? 'Poor room cleans will be retried once with two passes' : 'Automatic retries turned off');
+  return next;
 });
 route('GET', /^\/api\/maintenance$/, () => maintenance.status(maintRecords(), robot.state));
 route('POST', /^\/api\/maintenance\/(\w+)\/done$/, (req, body, [key]) => {
@@ -495,6 +573,9 @@ setInterval(() => {
   const m = robot.state.cleanMissionStatus || {};
   if (robot.connected && !tracker.current && m.phase === 'charge') robot.refresh().then(pushStatus).catch((e) => log.error(e));
 }, 6 * 3600000);
+
+setInterval(checkWarnings, 6 * 3600000);
+try { backfillReviews(); } catch (e) { log.error('review backfill failed:', e.message); }
 
 server.listen(PORT, '127.0.0.1', () => {
   log.info(`sweepd ${VERSION} listening on http://127.0.0.1:${PORT}`);

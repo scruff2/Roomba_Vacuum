@@ -21,7 +21,9 @@ const COUNTERS = {
   navResets: 'bbrstinfo.nNavRst',
   mobilityResets: 'bbrstinfo.nMobRst',
   memoryResets: 'bbrstinfo.nOomRst',
-  chargeCycles: 'batInfo.cCount'
+  chargeCycles: 'batInfo.cCount',
+  chargeChatters: 'bbchg.nChatters',
+  chargeErrors: 'bbchg.nChgErr'
 };
 
 function get (obj, dotted) {

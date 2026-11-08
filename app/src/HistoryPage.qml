@@ -123,14 +123,16 @@ ScrollView {
                             spacing: 10
                             Rectangle {
                                 width: 8; height: 8; radius: 4
-                                color: modelData.result === "completed" ? Ui.good : modelData.result === "error" ? Ui.bad : !modelData.end ? theme.accent : Ui.warn
+                                readonly property string verdict: modelData.review ? modelData.review.verdict : ""
+                                color: !modelData.end ? theme.accent : verdict === "poor" || modelData.result === "error" ? Ui.bad
+                                     : modelData.result === "completed" ? Ui.good : Ui.warn
                             }
                             ColumnLayout {
                                 spacing: 0
                                 Layout.fillWidth: true
                                 Label { text: Fmt.dateTime(modelData.start); color: Ui.text }
                                 Label {
-                                    text: qsTr("%1 · %2").arg(Fmt.result(modelData.result)).arg(Fmt.minutes(modelData.missionMinutes || (modelData.end ? (modelData.end - modelData.start) / 60000 : null)))
+                                    text: qsTr("%1 · %2").arg(modelData.review && modelData.review.verdict === "poor" ? qsTr("Poor clean") : Fmt.result(modelData.result)).arg(Fmt.minutes(modelData.missionMinutes || (modelData.end ? (modelData.end - modelData.start) / 60000 : null)))
                                     color: Ui.muted
                                     font.pixelSize: 12
                                 }
@@ -145,6 +147,43 @@ ScrollView {
                 Layout.fillWidth: true
                 Layout.alignment: Qt.AlignTop
                 visible: !!page.selected
+
+                // Sweep's verdict on the clean, with what went wrong and what to do.
+                Rectangle {
+                    id: verdictBox
+                    readonly property var review: page.selected && page.selected.review ? page.selected.review : null
+                    visible: !!review && (review.verdict === "poor" || review.verdict === "good")
+                    Layout.fillWidth: true
+                    implicitHeight: verdictCol.implicitHeight + 20
+                    radius: Math.min(6, theme.radius)
+                    color: review && review.verdict === "poor" ? Qt.rgba(1, 0.42, 0.42, 0.10) : Qt.rgba(0.37, 0.83, 0.55, 0.08)
+                    border.color: review && review.verdict === "poor" ? Ui.bad : Ui.good
+                    ColumnLayout {
+                        id: verdictCol
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 4
+                        Label {
+                            text: verdictBox.review && verdictBox.review.verdict === "poor" ? qsTr("Poor clean") : qsTr("Looks like a good clean")
+                            color: verdictBox.review && verdictBox.review.verdict === "poor" ? Ui.bad : Ui.good
+                            font.weight: Font.DemiBold
+                        }
+                        Repeater {
+                            model: verdictBox.review ? verdictBox.review.reasons : []
+                            Label { required property string modelData; text: "• " + modelData; color: Ui.text; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                        }
+                        Repeater {
+                            model: verdictBox.review ? verdictBox.review.advice : []
+                            Label { required property string modelData; text: "→ " + modelData; color: Ui.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                        }
+                        Label {
+                            visible: !!(page.selected && page.selected.retryOf)
+                            text: qsTr("This was an automatic retry of a poor clean.")
+                            color: Ui.muted
+                            font.pixelSize: 12
+                        }
+                    }
+                }
 
                 PhaseTimeline {
                     Layout.fillWidth: true

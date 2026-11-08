@@ -20,7 +20,9 @@ ScrollView {
         daemon.get("/api/presence", (ok, d) => { if (ok) page.presence = d; });
         daemon.get("/api/quiet", (ok, d) => { if (ok) page.quiet = d; });
         daemon.get("/api/log?limit=40", (ok, d) => { if (ok) page.log = d; });
+        daemon.get("/api/insights", (ok, d) => { if (ok) page.review = d.review; });
     }
+    property var review: ({ autoRetry: false })
     function saved(ok, d, what) {
         if (!ok) window.toast(qsTr("Couldn't save %1: %2").arg(what).arg(d.error), true);
         page.load();
@@ -193,6 +195,11 @@ ScrollView {
                         onEditingFinished: if (text !== page.quiet.end) daemon.send("PUT", "/api/quiet", { end: text }, (ok, d) => page.saved(ok, d, qsTr("quiet hours")))
                     }
                 }
+                Switch {
+                    text: qsTr("Retry poor room cleans once, with two passes")
+                    checked: !!page.review.autoRetry
+                    onToggled: daemon.send("PUT", "/api/review", { autoRetry: checked }, (ok, d) => { if (ok) page.review = d; else page.saved(ok, d, qsTr("retry setting")); })
+                }
                 Label { text: qsTr("Desktop notifications"); color: Ui.muted; Layout.topMargin: 8 }
                 Repeater {
                     model: [
@@ -202,7 +209,9 @@ ScrollView {
                         { key: "lowBattery", label: qsTr("Battery low away from the dock") },
                         { key: "offline", label: qsTr("Robot unreachable for 10 minutes") },
                         { key: "automation", label: qsTr("An automation started or docked the robot") },
-                        { key: "maintenance", label: qsTr("Maintenance is due") }
+                        { key: "maintenance", label: qsTr("Maintenance is due") },
+                        { key: "review", label: qsTr("A clean looked poor (with what went wrong)") },
+                        { key: "health", label: qsTr("Early warning about wear or faults") }
                     ]
                     CheckBox {
                         required property var modelData
