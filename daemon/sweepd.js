@@ -268,6 +268,12 @@ route('PUT', /^\/api\/rooms\/([\w-]+)$/, (req, body, [id]) => {
   if (!room) throw Object.assign(new Error('unknown room'), { status: 404 });
   room.name = String(body.name || '').trim() || null;
   store.set('rooms', r);
+  // A room is usually named while its first clean is still running; fix that mission's label too.
+  const cur = tracker.current;
+  if (cur && Array.isArray(cur.rooms) && cur.rooms.some((x) => x.id === id)) {
+    cur.rooms = cur.rooms.map((x) => (x.id === id ? { ...x, name: rooms.roomName(r, id) } : x));
+    store.saveMission(cur);
+  }
   record('rooms', `Room #${id} named “${room.name || ''}”`);
   pushStatus();
   return r;
