@@ -472,6 +472,15 @@ route('POST', /^\/api\/routines\/([\w-]+)\/clean$/, async (req, body, [id]) => {
   if (!r) throw Object.assign(new Error('unknown routine'), { status: 404 });
   return cleanRoomList(r.rooms, r.name);
 });
+// Developer endpoints for research: the robot's full raw state, and a raw
+// settings write (a "delta"). Changes still require the X-Sweep header.
+route('GET', /^\/api\/raw$/, () => robot.state);
+route('POST', /^\/api\/raw\/delta$/, async (req, body) => {
+  if (!body || typeof body !== 'object' || Array.isArray(body) || !Object.keys(body).length) throw new Error('send an object of settings to change');
+  await robot.setPreferences(body);
+  record('settings', `Raw setting change: ${JSON.stringify(body)}`, body);
+  return { ok: true };
+});
 route('GET', /^\/api\/insights$/, () => ({ warnings: currentWarnings(), review: reviewSettings() }));
 route('PUT', /^\/api\/review$/, (req, body) => {
   const next = { ...reviewSettings(), autoRetry: !!body.autoRetry };

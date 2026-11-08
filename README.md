@@ -52,6 +52,8 @@ tools/sniff.js       raw MQTT sniffer for research (stop sweepd first)
 - `dock` mid-clean only pauses; sweepd pauses, waits, then docks.
 - Settings changes take about 5 s to be confirmed by the robot.
 
+Detailed findings, experiment results and next steps: [docs/ROOMBA_RESEARCH.md](docs/ROOMBA_RESEARCH.md).
+
 ## CLI
 
 ```
