@@ -10,13 +10,21 @@ function extractRooms (cmd) {
   if (!cmd || cmd.command !== 'start' || !Array.isArray(cmd.regions) || !cmd.regions.length || !cmd.pmap_id) return null;
   const regions = cmd.regions
     .filter((r) => r && r.region_id != null)
-    .map((r) => ({ id: String(r.region_id), type: r.type || 'rid', params: r.params || null }));
+    .map((r) => ({ id: String(r.region_id), type: r.type || 'rid', key: keyOf(r.type || 'rid', r.region_id), params: r.params || null }));
   // Keep any extra fields the firmware sent (e.g. params) so our commands match its shape.
   const { command, time, initiator, regions: _r, pmap_id: _p, user_pmapv_id: _v, ...extra } = cmd;
   return { pmapId: cmd.pmap_id, version: cmd.user_pmapv_id || null, regions, template: extra, time: cmd.time || null, initiator: initiator || null };
 }
 
 const EMPTY = { pmapId: null, version: null, template: {}, rooms: [] };
+
+// Rooms and clean zones are numbered separately (room 0 and zone 0 can both
+// exist), so Sweep identifies each by a key: "0" for a room, "z0" for a zone.
+function keyOf (type, id) { return type === 'zid' ? `z${id}` : String(id); }
+function roomKey (r) { return keyOf(r.type, r.id); }
+function findRoom (store, key) {
+  return store && store.rooms ? store.rooms.find((r) => roomKey(r) === String(key)) : undefined;
+}
 
 // Per-room cleaning passes, in the form the app sends them with each room.
 const PASSES = {
@@ -48,12 +56,12 @@ function mergeRooms (store, seen) {
   s.template = seen.template || s.template;
   const added = [];
   for (const r of seen.regions) {
-    const known = s.rooms.find((x) => x.id === r.id && x.type === r.type);
+    const known = s.rooms.find((x) => roomKey(x) === r.key);
     if (known) {
       if (r.params) known.params = r.params;
     } else {
       s.rooms.push({ id: r.id, type: r.type, name: null, params: r.params, seenAt: seen.time ? seen.time * 1000 : Date.now() });
-      added.push(r.id);
+      added.push(r.key);
     }
   }
   return { store: s, added, mapChanged };
@@ -69,7 +77,7 @@ function buildCleanArgs (store, pmaps, ids, { ordered = true } = {}) {
   if (!store || !store.pmapId) throw new Error('no rooms captured yet: start one room clean from the iRobot app first');
   if (!Array.isArray(ids) || !ids.length) throw new Error('choose at least one room');
   const regions = ids.map((id) => {
-    const room = store.rooms.find((r) => r.id === String(id));
+    const room = findRoom(store, id);
     if (!room) throw new Error(`unknown room ${id}`);
     // The app sends each room's cleaning settings (passes) with it; do the same.
     const params = room.passes ? PASSES[room.passes] : room.params;
@@ -87,14 +95,15 @@ function validateRoutine (r, store) {
   if (!r || typeof r.name !== 'string' || !r.name.trim()) throw new Error('routine needs a name');
   if (!Array.isArray(r.rooms) || !r.rooms.length) throw new Error('routine needs at least one room');
   for (const id of r.rooms) {
-    if (!store || !store.rooms.some((x) => x.id === String(id))) throw new Error(`unknown room ${id}`);
+    if (!findRoom(store, id)) throw new Error(`unknown room ${id}`);
   }
   return { name: r.name.trim(), rooms: r.rooms.map(String) };
 }
 
 function roomName (store, id) {
-  const r = store && store.rooms && store.rooms.find((x) => x.id === String(id));
-  return r ? (r.name || `Room ${r.id}`) : `Room ${id}`;
+  const r = findRoom(store, id);
+  if (!r) return `Room ${id}`;
+  return r.name || (r.type === 'zid' ? `Zone ${r.id}` : `Room ${r.id}`);
 }
 
-module.exports = { PASSES, passesOf, roomPasses, validateRoutine, isFromApp, extractRooms, mergeRooms, buildCleanArgs, currentVersion, roomName, EMPTY };
+module.exports = { keyOf, roomKey, findRoom, PASSES, passesOf, roomPasses, validateRoutine, isFromApp, extractRooms, mergeRooms, buildCleanArgs, currentVersion, roomName, EMPTY };

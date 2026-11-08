@@ -25,7 +25,7 @@ test('extracts map, regions and extra fields', () => {
   const seen = extractRooms(appCommand(['3', '7'], { params: { noAutoPasses: true } }));
   assert.strictEqual(seen.pmapId, 'FlMVrzHlRMKFOd8oMfA15Q');
   assert.strictEqual(seen.version, '261108T181512');
-  assert.deepStrictEqual(seen.regions, [{ id: '3', type: 'rid', params: null }, { id: '7', type: 'rid', params: null }]);
+  assert.deepStrictEqual(seen.regions, [{ id: '3', type: 'rid', key: '3', params: null }, { id: '7', type: 'rid', key: '7', params: null }]);
   assert.deepStrictEqual(seen.template, { ordered: 1, params: { noAutoPasses: true } });
 });
 
@@ -62,4 +62,20 @@ test('builds a clean command in the order given, using the app\'s map version an
   assert.throws(() => buildCleanArgs(store, pmaps, ['99']), /unknown room/);
   assert.throws(() => buildCleanArgs(store, pmaps, []), /at least one/);
   assert.throws(() => buildCleanArgs(null, pmaps, ['3']), /no rooms captured/);
+});
+
+test('a clean zone and a room with the same number stay distinct', () => {
+  const room = extractRooms(appCommand(['0']));
+  const zoneCmd = appCommand(['0']);
+  zoneCmd.regions[0].type = 'zid';
+  zoneCmd.regions[0].params = { noAutoPasses: true, twoPass: true };
+  let { store } = mergeRooms(null, room);
+  const res = mergeRooms(store, extractRooms(zoneCmd));
+  store = res.store;
+  assert.deepStrictEqual(res.added, ['z0']);
+  store.rooms[0].name = 'Kitchen';
+  assert.strictEqual(roomName(store, '0'), 'Kitchen');
+  assert.strictEqual(roomName(store, 'z0'), 'Zone 0');
+  const args = buildCleanArgs(store, [], ['z0', '0']);
+  assert.deepStrictEqual(args.regions.map((r) => [r.type, r.region_id]), [['zid', '0'], ['rid', '0']]);
 });

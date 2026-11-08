@@ -89,7 +89,10 @@ function captureRooms (cmd) {
   const { store: next, added, mapChanged } = rooms.mergeRooms(roomStore(), seen);
   store.set('rooms', next);
   if (mapChanged) record('rooms', 'The robot is using a different map; room names were reset');
-  for (const id of added) record('rooms', `Found a new ${seen.regions.find((r) => r.id === id).type === 'zid' ? 'zone' : 'room'} (#${id}); name it on the Rooms page`, { id });
+  for (const key of added) {
+    const reg = seen.regions.find((r) => r.key === key);
+    record('rooms', `Found a new ${reg.type === 'zid' ? 'clean zone' : 'room'} (#${key}); name it on the Rooms page`, { id: key });
+  }
   if (added.length || mapChanged) broadcast('rooms', next);
 }
 
@@ -111,7 +114,7 @@ function statusPayload () {
     quietNow: inQuietHours(Date.now(), quiet()),
     next: nextScheduled(store.automations(), Date.now()),
     countersUpdated: robot.lastFullAt || null,
-    rooms: roomStore().rooms.map((r) => ({ id: r.id, type: r.type, name: r.name, passes: rooms.roomPasses(r) })),
+    rooms: roomStore().rooms.map((r) => ({ id: rooms.roomKey(r), type: r.type, name: r.name, passes: rooms.roomPasses(r) })),
     routines: routines(),
     maintenanceDue: maintenance.status(maintRecords(), robot.state).filter((x) => x.due).map((x) => ({ key: x.key, label: x.label }))
   });
@@ -168,7 +171,7 @@ robot.on('update', (reported, state) => {
       // Remember which rooms were asked for, if this mission was a room clean.
       const asked = rooms.extractRooms(state.lastCommand);
       if (asked && Math.abs(asked.time * 1000 - m.start) < 5 * 60000) {
-        m.rooms = asked.regions.map((r) => ({ id: r.id, name: rooms.roomName(roomStore(), r.id) }));
+        m.rooms = asked.regions.map((r) => ({ id: r.key, name: rooms.roomName(roomStore(), r.key) }));
       }
     }
     if (ev.type === 'start') { store.saveMission(m); record('mission', `Mission started by ${m.initiator || 'unknown'}`, { id: m.id }); broadcast('mission', missionSummary(m)); }
@@ -289,11 +292,11 @@ route('POST', /^\/api\/cmd\/(\w+)$/, async (req, body, [cmd]) => {
 route('POST', /^\/api\/refresh$/, async () => { await robot.refresh(); pushStatus(); return { ok: true, countersUpdated: robot.lastFullAt }; });
 route('GET', /^\/api\/rooms$/, () => {
   const r = roomStore();
-  return { ...r, rooms: r.rooms.map((x) => ({ ...x, passes: rooms.roomPasses(x) })), currentVersion: rooms.currentVersion(robot.state.pmaps, r.pmapId), maps: robot.state.pmaps || [] };
+  return { ...r, rooms: r.rooms.map((x) => ({ ...x, id: rooms.roomKey(x), regionId: x.id, passes: rooms.roomPasses(x) })), currentVersion: rooms.currentVersion(robot.state.pmaps, r.pmapId), maps: robot.state.pmaps || [] };
 });
 route('PUT', /^\/api\/rooms\/([\w-]+)$/, (req, body, [id]) => {
   const r = roomStore();
-  const room = r.rooms.find((x) => x.id === id);
+  const room = rooms.findRoom(r, id);
   if (!room) throw Object.assign(new Error('unknown room'), { status: 404 });
   if ('name' in body) room.name = String(body.name || '').trim() || null;
   if ('passes' in body) {
@@ -310,11 +313,11 @@ route('PUT', /^\/api\/rooms\/([\w-]+)$/, (req, body, [id]) => {
   if ('name' in body) record('rooms', `Room #${id} named “${room.name || ''}”`);
   if ('passes' in body) record('rooms', `${rooms.roomName(r, id)}: ${rooms.roomPasses(room) || 'default'} pass${rooms.roomPasses(room) === 'one' ? '' : 'es'}`);
   pushStatus();
-  return { ...r, rooms: r.rooms.map((x) => ({ ...x, passes: rooms.roomPasses(x) })) };
+  return { ...r, rooms: r.rooms.map((x) => ({ ...x, id: rooms.roomKey(x), regionId: x.id, passes: rooms.roomPasses(x) })) };
 });
 route('DELETE', /^\/api\/rooms\/([\w-]+)$/, (req, body, [id]) => {
   const r = roomStore();
-  r.rooms = r.rooms.filter((x) => x.id !== id);
+  r.rooms = r.rooms.filter((x) => rooms.roomKey(x) !== id);
   store.set('rooms', r);
   pushStatus();
   return r;
