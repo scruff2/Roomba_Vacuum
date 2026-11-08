@@ -1,0 +1,12 @@
+#!/bin/sh
+# Installs sweepd as a systemd user service and (re)starts it.
+set -eu
+root=$(cd "$(dirname "$0")/.." && pwd)
+node=$(readlink -f "$(command -v node)")
+unit="$HOME/.config/systemd/user/sweepd.service"
+mkdir -p "$(dirname "$unit")"
+sed -e "s|@NODE@|$node|" -e "s|@ROOT@|$root|g" "$root/daemon/sweepd.service" > "$unit"
+systemctl --user daemon-reload
+systemctl --user enable sweepd.service
+systemctl --user restart sweepd.service
+echo "sweepd installed ($unit), using $node"

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Sweep
+Comment=Control your Roomba: history, automations, settings and health
+Exec=sweep
+Icon=sweep
+Terminal=false
+Categories=Utility;
+StartupWMClass=sweep

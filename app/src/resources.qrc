@@ -1,0 +1,22 @@
+<RCC>
+    <qresource prefix="/">
+        <file alias="Main.qml">Main.qml</file>
+        <file alias="qmldir">qmldir</file>
+        <file alias="Ui.qml">Ui.qml</file>
+        <file alias="Format.js">Format.js</file>
+        <file alias="Panel.qml">Panel.qml</file>
+        <file alias="ActionButton.qml">ActionButton.qml</file>
+        <file alias="StatLine.qml">StatLine.qml</file>
+        <file alias="BigNumber.qml">BigNumber.qml</file>
+        <file alias="LineChart.qml">LineChart.qml</file>
+        <file alias="BarChart.qml">BarChart.qml</file>
+        <file alias="PhaseTimeline.qml">PhaseTimeline.qml</file>
+        <file alias="HomePage.qml">HomePage.qml</file>
+        <file alias="HistoryPage.qml">HistoryPage.qml</file>
+        <file alias="AutomationsPage.qml">AutomationsPage.qml</file>
+        <file alias="AutomationEditor.qml">AutomationEditor.qml</file>
+        <file alias="SettingsPage.qml">SettingsPage.qml</file>
+        <file alias="HealthPage.qml">HealthPage.qml</file>
+        <file alias="i18n/en.json">i18n/en.json</file>
+    </qresource>
+</RCC>

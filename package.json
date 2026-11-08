@@ -1,0 +1,16 @@
+{
+  "name": "sweep",
+  "version": "1.0.0",
+  "description": "Local Roomba control: sweepd service, Sweep desktop app, CLI",
+  "scripts": {
+    "test": "node --test daemon/test/",
+    "daemon": "node daemon/sweepd.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "dorita980": "^4.0.0"
+  }
+}

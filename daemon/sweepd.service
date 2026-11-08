@@ -1,0 +1,14 @@
+[Unit]
+Description=Sweep robot vacuum service (local Roomba control, history, automations)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Installed by bin/install-daemon, which fills in the node and project paths.
+ExecStart=@NODE@ @ROOT@/daemon/sweepd.js
+WorkingDirectory=@ROOT@
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
