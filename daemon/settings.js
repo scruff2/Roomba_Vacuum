@@ -1,5 +1,8 @@
 'use strict';
 // Maps the robot's raw preference fields to friendly settings and back.
+// Suction (carpetBoost/vacHigh) and edge cleaning (openOnly) are left out:
+// on the j8+ the robot silently ignores suction writes and doesn't support
+// edge cleaning (see docs/ROOMBA_RESEARCH.md).
 // Each setting reports whether this robot actually exposes it, so the app
 // never shows a switch that silently does nothing.
 
@@ -8,16 +11,6 @@ const SETTINGS = {
     label: 'Cleaning passes', choices: ['auto', 'one', 'two'],
     read: (s) => (s.noAutoPasses === undefined ? undefined : !s.noAutoPasses ? 'auto' : s.twoPass ? 'two' : 'one'),
     write: (v) => ({ auto: { noAutoPasses: false, twoPass: false }, one: { noAutoPasses: true, twoPass: false }, two: { noAutoPasses: true, twoPass: true } })[v]
-  },
-  suction: {
-    label: 'Suction power', choices: ['auto', 'eco', 'performance'],
-    read: (s) => (s.vacHigh === undefined && s.carpetBoost === undefined ? undefined : s.carpetBoost ? 'auto' : s.vacHigh ? 'performance' : 'eco'),
-    write: (v) => ({ auto: { carpetBoost: true, vacHigh: false }, eco: { carpetBoost: false, vacHigh: false }, performance: { carpetBoost: false, vacHigh: true } })[v]
-  },
-  edgeClean: {
-    label: 'Edge cleaning', type: 'bool',
-    read: (s) => (s.openOnly == null ? undefined : !s.openOnly),
-    write: (v) => ({ openOnly: !v })
   },
   alwaysFinish: {
     label: 'Keep cleaning when bin is full', type: 'bool',

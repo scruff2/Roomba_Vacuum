@@ -8,7 +8,7 @@ const dorita980 = require('dorita980');
 // This firmware rejects dorita980's default TLS 1.2 cipher, so TLS 1.3 suites go first.
 const CIPHERS = 'TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256:AES128-SHA256';
 // train = mapping run (explores without vacuuming to build or improve the map).
-const COMMANDS = ['start', 'clean', 'pause', 'resume', 'stop', 'dock', 'find', 'evac', 'train'];
+const COMMANDS = ['start', 'pause', 'resume', 'stop', 'dock', 'find', 'evac', 'train'];
 
 class Robot extends EventEmitter {
   constructor (cfg, log = console) {

@@ -42,16 +42,13 @@ ScrollView {
 
     readonly property var descriptions: ({
         passes: qsTr("Auto lets the robot decide; two passes cleans everything twice."),
-        suction: qsTr("Auto boosts on carpet; performance always runs at full power; eco is quietest."),
-        edgeClean: qsTr("Follow walls and edges during cleaning."),
         alwaysFinish: qsTr("When the bin fills mid-clean, keep going instead of pausing for you to empty it."),
         childLock: qsTr("Disables the button on the robot."),
         ecoCharge: qsTr("Charge more slowly to extend battery life."),
         volume: qsTr("How loud the robot's voice and tones are.")
     })
     readonly property var choiceLabels: ({
-        auto: qsTr("Auto"), one: qsTr("One"), two: qsTr("Two"),
-        eco: qsTr("Eco"), performance: qsTr("Performance")
+        auto: qsTr("Auto"), one: qsTr("One"), two: qsTr("Two")
     })
 
     ColumnLayout {
@@ -68,7 +65,7 @@ ScrollView {
             title: qsTr("Cleaning")
             Layout.fillWidth: true
             Repeater {
-                model: ["passes", "suction", "edgeClean", "alwaysFinish"]
+                model: ["passes", "alwaysFinish"]
                 delegate: settingRow
             }
         }

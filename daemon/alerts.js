@@ -34,4 +34,4 @@ class Alerts {
   }
 }
 
-module.exports = { Alerts, ALERT_DEFAULTS: DEFAULTS };
+module.exports = { Alerts };

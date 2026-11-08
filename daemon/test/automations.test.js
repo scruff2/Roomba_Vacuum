@@ -86,9 +86,10 @@ test('settings map to robot fields and back', () => {
   assert.deepStrictEqual(buildDelta({ alwaysFinish: true }), { binPause: false });
   assert.deepStrictEqual(buildDelta({ volume: 140 }), { audio: { volume: 100 } });
   assert.throws(() => buildDelta({ passes: 'three' }));
-  const s = readSettings({ noAutoPasses: false, twoPass: false, binPause: true, openOnly: null, audio: { volume: 40 } });
+  const s = readSettings({ noAutoPasses: false, twoPass: false, binPause: true, audio: { volume: 40 } });
   assert.strictEqual(s.passes.value, 'auto');
   assert.strictEqual(s.alwaysFinish.value, false);
-  assert.strictEqual(s.edgeClean.supported, false);
+  assert.strictEqual(s.childLock.supported, false);
+  assert.ok(!('suction' in s) && !('edgeClean' in s));
   assert.strictEqual(s.volume.value, 40);
 });
