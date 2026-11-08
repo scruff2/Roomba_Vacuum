@@ -323,15 +323,18 @@ route('DELETE', /^\/api\/rooms\/([\w-]+)$/, (req, body, [id]) => {
   return r;
 });
 route('POST', /^\/api\/rooms\/clean$/, (req, body) => cleanRoomList(body.rooms || []));
-// Wait briefly to see whether the robot set off or refused (error 224).
-function cleanOutcome (timeoutMs = 9000) {
+// Wait to see whether the robot sets off, refuses with error 224, or does
+// nothing. It briefly reports a clean cycle while still docked even when it is
+// about to refuse, so only a "run" (or travelling home mid-mission) counts.
+function cleanOutcome (timeoutMs = 10000) {
   return new Promise((resolve) => {
-    // The robot briefly reports a clean cycle while still docked even when it is
-    // about to refuse, so only count it as started once it leaves the charge phase.
-    const started = () => { const m = robot.state.cleanMissionStatus || {}; return m.cycle && m.cycle !== 'none' && m.phase !== 'charge'; };
+    const started = () => {
+      const m = robot.state.cleanMissionStatus || {};
+      return m.cycle && m.cycle !== 'none' && (m.phase === 'run' || String(m.phase).startsWith('hm'));
+    };
     const finish = (result) => { clearTimeout(t); robot.off('update', check); resolve(result); };
     const check = () => { if (started()) finish('started'); };
-    const t = setTimeout(() => finish(started() ? 'started' : (robot.state.cleanMissionStatus || {}).error === 224 ? 'rejected' : 'unknown'), timeoutMs);
+    const t = setTimeout(() => finish(started() ? 'started' : (robot.state.cleanMissionStatus || {}).error === 224 ? 'rejected' : 'ignored'), timeoutMs);
     robot.on('update', check);
   });
 }
@@ -349,7 +352,13 @@ async function cleanRoomList (ids, label) {
     const args = { ...rooms.buildCleanArgs(store0, robot.state.pmaps, ids, { ordered: true }), user_pmapv_id: version };
     await robot.cleanRooms(args);
     const outcome = await cleanOutcome();
-    if (outcome !== 'rejected') {
+    if (outcome === 'ignored') {
+      const noMap = !(robot.state.pmaps || []).length;
+      const why = noMap ? 'it currently reports no saved map (it may still be processing a map change)' : 'it gave no reason';
+      record('error', `The robot didn't start cleaning ${names}: ${why}. Try again in a few minutes, start it once from the iRobot app, or restart the robot.`, { rooms: ids });
+      throw new Error(`the robot didn't start: ${why}`);
+    }
+    if (outcome === 'started') {
       if (version !== store0.version) {
         store.set('rooms', { ...roomStore(), version });
         record('rooms', `Map version updated to ${version}`);
@@ -359,8 +368,8 @@ async function cleanRoomList (ids, label) {
     }
     if (i < versions.length - 1) log.info(`room clean refused with map ${version}; retrying with ${versions[i + 1]}`);
   }
-  record('error', `The robot refused to clean ${names} (error 224, map out of date). Start one room clean from the iRobot app so Sweep can learn the current map.`, { rooms: ids });
-  throw new Error('the robot refused (map out of date). Start one room clean from the iRobot app, then try again.');
+  record('error', `The robot refused to clean ${names} (error 224, map out of date). Start one room clean from the iRobot app so Sweep can learn the current map; if the app is refused too, restart the robot.`, { rooms: ids });
+  throw new Error('the robot refused (map out of date). Start one room clean from the iRobot app, or restart the robot if the app is refused too, then try again.');
 }
 route('GET', /^\/api\/routines$/, () => routines());
 route('POST', /^\/api\/routines$/, (req, body) => {
