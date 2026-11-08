@@ -96,10 +96,20 @@ ScrollView {
                 }
                 ActionButton { text: qsTr("Clear"); flat: true; enabled: page.selected.length > 0; onClicked: page.selected = [] }
                 ActionButton { text: qsTr("Select all"); flat: true; onClicked: page.selected = page.rooms.map((r) => r.id) }
+                // Shown while a mission runs, including one Sweep just started,
+                // so it says what's happening rather than reading like an error.
                 Label {
                     visible: !!daemon.status.active
-                    text: qsTr("The robot is busy; dock it first.")
-                    color: Ui.warn
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    readonly property var mission: daemon.status.mission || {}
+                    readonly property string where: mission.rooms && mission.rooms.length
+                        ? mission.rooms.map((r) => r.name).join(" → ") : ""
+                    text: daemon.status.error
+                          ? qsTr("The robot needs attention (%1). Rooms can be cleaned once it's back on the dock.").arg(daemon.status.errorText || daemon.status.error)
+                          : where ? qsTr("Cleaning %1 now. Pick rooms for the next clean once it's docked.").arg(where)
+                          : qsTr("The robot is cleaning now. Pick rooms for the next clean once it's docked.")
+                    color: daemon.status.error ? Ui.warn : Ui.muted
                 }
             }
         }
@@ -137,7 +147,12 @@ ScrollView {
             title: qsTr("Map")
             Layout.fillWidth: true
             StatLine { label: qsTr("Map in use"); value: page.info.pmapId || qsTr("None captured yet") }
-            StatLine { label: qsTr("Map version"); value: page.info.currentVersion || page.info.version || "—" }
+            StatLine {
+                label: qsTr("Version used for room cleans")
+                value: page.info.version || "—"
+                hint: qsTr("The version the iRobot app last used. The robot rejects newer local versions (error 224) until they're synced.")
+            }
+            StatLine { label: qsTr("Robot's latest saved version"); value: page.info.currentVersion || "—" }
             StatLine { label: qsTr("Maps on the robot"); value: Fmt.number((page.info.maps || []).length) }
             Label {
                 Layout.fillWidth: true
