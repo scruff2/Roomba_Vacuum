@@ -10,6 +10,8 @@ Dialog {
     signal saved()
     property var rule: null
     property var days: [0, 1, 2, 3, 4, 5, 6]
+    property var rooms: []          // room ids, in cleaning order; empty = whole house
+    readonly property var knownRooms: daemon.status.rooms || []
 
     modal: true
     anchors.centerIn: Overlay.overlay
@@ -29,6 +31,7 @@ Dialog {
         onlyAway.checked = !!c.onlyWhenAway;
         delay.value = c.delayMin != null ? c.delayMin : 10;
         arriveAction.currentIndex = c.action === "pause" ? 1 : 0;
+        rooms = c.rooms ? c.rooms.slice() : [];
         error.text = "";
         open();
         nameField.forceActiveFocus();
@@ -41,6 +44,7 @@ Dialog {
         if (type === "away") config.delayMin = delay.value;
         if (type === "arrive") config.action = arriveAction.currentIndex === 1 ? "pause" : "dock";
         if (type !== "arrive") {
+            if (rooms.length) config.rooms = rooms.slice();
             if (minBattery.value) config.minBattery = minBattery.value;
             if (skipHours.value) config.skipIfCleanedWithinH = skipHours.value;
             if (onlyAway.checked && type === "schedule") config.onlyWhenAway = true;
@@ -119,6 +123,30 @@ Dialog {
             visible: typeBox.currentIndex === 2
             Label { text: qsTr("Then"); color: Ui.muted; Layout.preferredWidth: 110 }
             ComboBox { id: arriveAction; model: [qsTr("Send it to the dock"), qsTr("Pause it")]; Layout.fillWidth: true }
+        }
+
+        // What to clean
+        ColumnLayout {
+            visible: typeBox.currentIndex !== 2 && dlg.knownRooms.length > 0
+            Layout.fillWidth: true
+            Label { text: qsTr("Clean (pick rooms in order, or none for the whole house)"); color: Ui.muted; Layout.topMargin: 6 }
+            Flow {
+                Layout.fillWidth: true
+                spacing: 6
+                Repeater {
+                    model: dlg.knownRooms
+                    ActionButton {
+                        required property var modelData
+                        readonly property int order: dlg.rooms.indexOf(modelData.id)
+                        text: (order >= 0 ? (order + 1) + " · " : "") + (modelData.name || qsTr("Room %1").arg(modelData.id))
+                        checkable: true
+                        checked: order >= 0
+                        highlighted: checked
+                        flat: !checked
+                        onClicked: dlg.rooms = order >= 0 ? dlg.rooms.filter((x) => x !== modelData.id) : dlg.rooms.concat([modelData.id])
+                    }
+                }
+            }
         }
 
         // Conditions for starting a clean

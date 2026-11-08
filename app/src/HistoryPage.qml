@@ -159,6 +159,11 @@ ScrollView {
                     columnSpacing: 32
                     StatLine { label: qsTr("Result"); value: Fmt.result(page.selected ? page.selected.result : null) }
                     StatLine { label: qsTr("Started by"); value: page.selected && page.selected.initiator ? page.selected.initiator : "—" }
+                    StatLine {
+                        Layout.columnSpan: 2
+                        label: qsTr("Rooms")
+                        value: page.selected && page.selected.rooms && page.selected.rooms.length ? page.selected.rooms.map((r) => r.name).join(" → ") : qsTr("Whole house")
+                    }
                     StatLine { label: qsTr("Duration"); value: page.selected && page.selected.end ? Fmt.minutes((page.selected.end - page.selected.start) / 60000) : "—" }
                     StatLine { label: qsTr("Cleaning time (robot)"); value: Fmt.minutes(page.selected ? page.selected.missionMinutes : null) }
                     StatLine { label: qsTr("Area"); value: page.selected && page.selected.sqft ? qsTr("%1 sq ft").arg(page.selected.sqft) : "—" }

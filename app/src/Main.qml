@@ -22,10 +22,11 @@ ApplicationWindow {
 
     readonly property var pages: [
         { title: qsTr("Home"), key: "1" },
-        { title: qsTr("History"), key: "2" },
-        { title: qsTr("Automations"), key: "3" },
-        { title: qsTr("Settings"), key: "4" },
-        { title: qsTr("Health"), key: "5" }
+        { title: qsTr("Rooms"), key: "2" },
+        { title: qsTr("History"), key: "3" },
+        { title: qsTr("Automations"), key: "4" },
+        { title: qsTr("Settings"), key: "5" },
+        { title: qsTr("Health"), key: "6" }
     ]
 
     // Messages from pages and commands, shown briefly at the bottom.
@@ -52,6 +53,7 @@ ApplicationWindow {
     Shortcut { sequence: "3"; context: Qt.ApplicationShortcut; onActivated: window.pageIndex = 2 }
     Shortcut { sequence: "4"; context: Qt.ApplicationShortcut; onActivated: window.pageIndex = 3 }
     Shortcut { sequence: "5"; context: Qt.ApplicationShortcut; onActivated: window.pageIndex = 4 }
+    Shortcut { sequence: "6"; context: Qt.ApplicationShortcut; onActivated: window.pageIndex = 5 }
     Shortcut {
         sequence: "Space"; context: Qt.ApplicationShortcut; enabled: window.canCommand
         onActivated: daemon.command(window.phase === "run" ? "pause" : "start")
@@ -183,6 +185,7 @@ ApplicationWindow {
                     Layout.rightMargin: 12
                     currentIndex: window.pageIndex
                     HomePage {}
+                    RoomsPage {}
                     HistoryPage {}
                     AutomationsPage {}
                     SettingsPage {}
@@ -236,7 +239,8 @@ ApplicationWindow {
                             ["D", qsTr("Send to dock")],
                             ["F", qsTr("Find robot (plays a sound)")],
                             ["E", qsTr("Empty bin into the base")],
-                            ["1 – 5", qsTr("Switch page")],
+                            ["1 – 6", qsTr("Switch page")],
+                            ["C", qsTr("Clean picked rooms (Rooms page)")],
                             ["N", qsTr("New automation (Automations page)")],
                             ["?", qsTr("Show or hide this list")],
                             ["Q", qsTr("Quit")]

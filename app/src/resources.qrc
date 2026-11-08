@@ -12,6 +12,7 @@
         <file alias="BarChart.qml">BarChart.qml</file>
         <file alias="PhaseTimeline.qml">PhaseTimeline.qml</file>
         <file alias="HomePage.qml">HomePage.qml</file>
+        <file alias="RoomsPage.qml">RoomsPage.qml</file>
         <file alias="HistoryPage.qml">HistoryPage.qml</file>
         <file alias="AutomationsPage.qml">AutomationsPage.qml</file>
         <file alias="AutomationEditor.qml">AutomationEditor.qml</file>

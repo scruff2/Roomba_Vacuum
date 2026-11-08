@@ -36,6 +36,11 @@ ScrollView {
         if (c.skipIfCleanedWithinH) conds.push(qsTr("skip if cleaned in last %1 h").arg(c.skipIfCleanedWithinH));
         if (c.onlyWhenAway) conds.push(qsTr("only when nobody's home"));
         let what;
+        const roomNames = (c.rooms || []).map((id) => {
+            const r = (daemon.status.rooms || []).find((x) => x.id === id);
+            return r && r.name ? r.name : qsTr("Room %1").arg(id);
+        });
+        if (roomNames.length) conds.unshift(qsTr("only %1").arg(roomNames.join(" → ")));
         if (rule.type === "schedule") {
             const names = Fmt.dayNames();
             const days = c.days && c.days.length && c.days.length < 7 ? c.days.map((d) => names[d]).join(", ") : qsTr("every day");

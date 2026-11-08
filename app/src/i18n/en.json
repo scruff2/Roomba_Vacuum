@@ -1,1 +1,8 @@
-{}
+{
+  "Clean %n room(s)  (C)": { "one": "Clean %n room  (C)", "other": "Clean %n rooms  (C)" },
+  "Cleaning %n room(s)": { "one": "Cleaning %n room", "other": "Cleaning %n rooms" },
+  "The robot has %n schedule(s) set in the iRobot app. They run independently of Sweep's automations.": {
+    "one": "The robot has %n schedule set in the iRobot app. It runs independently of Sweep's automations.",
+    "other": "The robot has %n schedules set in the iRobot app. They run independently of Sweep's automations."
+  }
+}

@@ -17,8 +17,9 @@ const { evaluate, nextScheduled, inQuietHours, validate } = require('./automatio
 const { Presence } = require('./presence');
 const { Alerts } = require('./alerts');
 const describe = require('./describe');
+const rooms = require('./rooms');
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 const PORT = Number(process.env.SWEEP_PORT) || 8099;
 const CONFIG = process.env.SWEEP_CONFIG || path.join(os.homedir(), '.config', 'sweep', 'config.json');
 const DB = process.env.SWEEP_DB || path.join(os.homedir(), '.local', 'share', 'sweep', 'sweep.db');
@@ -55,6 +56,22 @@ function record (kind, message, data) {
   return e;
 }
 
+function roomStore () { return store.get('rooms', rooms.EMPTY); }
+
+// Learn rooms from room cleans the iRobot app starts (see rooms.js).
+let lastSeenCommandTime = null;
+function captureRooms (cmd) {
+  if (!cmd || cmd.time === lastSeenCommandTime || !rooms.isFromApp(cmd)) return;
+  lastSeenCommandTime = cmd.time;
+  const seen = rooms.extractRooms(cmd);
+  if (!seen) return;
+  const { store: next, added, mapChanged } = rooms.mergeRooms(roomStore(), seen);
+  store.set('rooms', next);
+  if (mapChanged) record('rooms', 'The robot is using a different map; room names were reset');
+  for (const id of added) record('rooms', `Found a new ${seen.regions.find((r) => r.id === id).type === 'zid' ? 'zone' : 'room'} (#${id}); name it on the Rooms page`, { id });
+  if (added.length || mapChanged) broadcast('rooms', next);
+}
+
 function quiet () { return store.get('quiet', { enabled: false, start: '22:00', end: '08:00' }); }
 
 function missionSummary (m) {
@@ -72,7 +89,8 @@ function statusPayload () {
     quiet: quiet(),
     quietNow: inQuietHours(Date.now(), quiet()),
     next: nextScheduled(store.automations(), Date.now()),
-    countersUpdated: robot.lastFullAt || null
+    countersUpdated: robot.lastFullAt || null,
+    rooms: roomStore().rooms.map((r) => ({ id: r.id, type: r.type, name: r.name }))
   });
 }
 
@@ -119,8 +137,16 @@ async function finishMission (m) {
 }
 
 robot.on('update', (reported, state) => {
+  if (reported.lastCommand) captureRooms(reported.lastCommand);
   for (const ev of tracker.feed(state)) {
     const m = ev.mission;
+    if (ev.type === 'start') {
+      // Remember which rooms were asked for, if this mission was a room clean.
+      const asked = rooms.extractRooms(state.lastCommand);
+      if (asked && Math.abs(asked.time * 1000 - m.start) < 5 * 60000) {
+        m.rooms = asked.regions.map((r) => ({ id: r.id, name: rooms.roomName(roomStore(), r.id) }));
+      }
+    }
     if (ev.type === 'start') { store.saveMission(m); record('mission', `Mission started by ${m.initiator || 'unknown'}`, { id: m.id }); broadcast('mission', missionSummary(m)); }
     if (ev.type === 'phase') { store.saveMission(m); broadcast('mission', missionSummary(m)); }
     if (ev.type === 'error') {
@@ -184,8 +210,11 @@ async function tick () {
   for (const { rule, action, reason } of fired) {
     store.markAutomationRun(rule.id, ctx.now);
     try {
-      await robot.command(action);
-      record('automation', `“${rule.name}” sent ${action} (${reason})`, { ruleId: rule.id, action });
+      const roomIds = action === 'start' && rule.config && Array.isArray(rule.config.rooms) ? rule.config.rooms : [];
+      if (roomIds.length) await robot.cleanRooms(rooms.buildCleanArgs(roomStore(), robot.state.pmaps, roomIds, { ordered: true }));
+      else await robot.command(action);
+      const what = roomIds.length ? `cleaning ${roomIds.map((id) => rooms.roomName(roomStore(), id)).join(', ')}` : action;
+      record('automation', `“${rule.name}” started ${what} (${reason})`, { ruleId: rule.id, action });
       alerts.send('automation', `Automation: ${rule.name}`, `Sent ${action} (${reason}).`, { cooldownMs: 0 });
     } catch (e) {
       record('automation', `“${rule.name}” failed to send ${action}: ${e.message}`, { ruleId: rule.id, action });
@@ -229,6 +258,33 @@ route('POST', /^\/api\/cmd\/(\w+)$/, async (req, body, [cmd]) => {
   return { ok: true, cmd };
 });
 route('POST', /^\/api\/refresh$/, async () => { await robot.refresh(); pushStatus(); return { ok: true, countersUpdated: robot.lastFullAt }; });
+route('GET', /^\/api\/rooms$/, () => {
+  const r = roomStore();
+  return { ...r, currentVersion: rooms.currentVersion(robot.state.pmaps, r.pmapId), maps: robot.state.pmaps || [] };
+});
+route('PUT', /^\/api\/rooms\/([\w-]+)$/, (req, body, [id]) => {
+  const r = roomStore();
+  const room = r.rooms.find((x) => x.id === id);
+  if (!room) throw Object.assign(new Error('unknown room'), { status: 404 });
+  room.name = String(body.name || '').trim() || null;
+  store.set('rooms', r);
+  record('rooms', `Room #${id} named “${room.name || ''}”`);
+  pushStatus();
+  return r;
+});
+route('DELETE', /^\/api\/rooms\/([\w-]+)$/, (req, body, [id]) => {
+  const r = roomStore();
+  r.rooms = r.rooms.filter((x) => x.id !== id);
+  store.set('rooms', r);
+  pushStatus();
+  return r;
+});
+route('POST', /^\/api\/rooms\/clean$/, async (req, body) => {
+  const args = rooms.buildCleanArgs(roomStore(), robot.state.pmaps, body.rooms, { ordered: body.ordered !== false });
+  await robot.cleanRooms(args);
+  record('command', `Cleaning ${body.rooms.map((id) => rooms.roomName(roomStore(), id)).join(', ')}`, { rooms: body.rooms });
+  return { ok: true, args };
+});
 route('GET', /^\/api\/missions$/, (req, body, m, q) => store.missions({ limit: Number(q.get('limit')) || 100, since: Number(q.get('since')) || 0 }).map(missionSummary));
 route('GET', /^\/api\/missions\/([\w-]+)$/, (req, body, [id]) => {
   const m = store.mission(id);

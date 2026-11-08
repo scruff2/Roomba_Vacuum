@@ -7,7 +7,8 @@ const dorita980 = require('dorita980');
 
 // This firmware rejects dorita980's default TLS 1.2 cipher, so TLS 1.3 suites go first.
 const CIPHERS = 'TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256:AES128-SHA256';
-const COMMANDS = ['start', 'clean', 'pause', 'resume', 'stop', 'dock', 'find', 'evac'];
+// train = mapping run (explores without vacuuming to build or improve the map).
+const COMMANDS = ['start', 'clean', 'pause', 'resume', 'stop', 'dock', 'find', 'evac', 'train'];
 
 class Robot extends EventEmitter {
   constructor (cfg, log = console) {
@@ -82,6 +83,12 @@ class Robot extends EventEmitter {
       await new Promise((resolve) => setTimeout(resolve, 2500));
     }
     await this.client[cmd]();
+  }
+
+  // Start a clean of specific rooms; args come from rooms.buildCleanArgs.
+  async cleanRooms (args) {
+    if (!this.connected) throw new Error('robot not connected');
+    await this.client.cleanRoom(args);
   }
 
   async setPreferences (delta) {
