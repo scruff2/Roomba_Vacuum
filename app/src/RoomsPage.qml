@@ -34,6 +34,34 @@ ScrollView {
             else window.toast(qsTr("Couldn't rename: %1").arg(d.error), true);
         });
     }
+    function setPasses(id, passes) {
+        daemon.send("PUT", "/api/rooms/" + id, { passes }, (ok, d) => {
+            if (ok) page.info = Object.assign({}, page.info, { rooms: d.rooms });
+            else window.toast(qsTr("Couldn't change passes: %1").arg(d.error), true);
+        });
+    }
+    readonly property var routines: daemon.status.routines || []
+    function roomNames(ids) {
+        return ids.map((id) => { const r = page.rooms.find((x) => x.id === id); return r ? page.nameOf(r) : qsTr("Room %1").arg(id); }).join(" → ");
+    }
+    function saveRoutine(name) {
+        daemon.send("POST", "/api/routines", { name, rooms: page.selected.slice() }, (ok, d) => {
+            if (ok) { window.toast(qsTr("Saved “%1”").arg(name), false); routineName.text = ""; }
+            else window.toast(qsTr("Couldn't save: %1").arg(d.error), true);
+        });
+    }
+    function runRoutine(r) {
+        daemon.send("POST", "/api/routines/" + r.id + "/clean", {}, (ok, d) => {
+            if (ok) window.toast(qsTr("Started “%1”").arg(r.name), false);
+            else window.toast(qsTr("Couldn't start: %1").arg(d.error), true);
+        });
+    }
+    function deleteRoutine(r) {
+        daemon.send("DELETE", "/api/routines/" + r.id, undefined, (ok, d) => {
+            if (!ok) window.toast(qsTr("Couldn't delete: %1").arg(d.error), true);
+        });
+    }
+
     function forget(id) {
         daemon.send("DELETE", "/api/rooms/" + id, undefined, (ok, d) => {
             if (ok) { page.info = Object.assign({}, page.info, { rooms: d.rooms }); page.selected = page.selected.filter((x) => x !== id); }
@@ -115,6 +143,50 @@ ScrollView {
         }
 
         Panel {
+            title: qsTr("Routines")
+            Layout.fillWidth: true
+            visible: page.rooms.length > 0
+            Label {
+                visible: page.routines.length === 0
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                color: Ui.muted
+                text: qsTr("Save rooms you clean together, like “Kitchen → Hallway after dinner”. Routines appear on the Home page and can be used in automations.")
+            }
+            Repeater {
+                model: page.routines
+                RowLayout {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    spacing: 12
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+                        Label { text: modelData.name; color: Ui.text; font.pixelSize: 15 }
+                        Label { text: page.roomNames(modelData.rooms); color: Ui.muted; font.pixelSize: 12; Layout.fillWidth: true; elide: Text.ElideRight }
+                    }
+                    ActionButton { text: qsTr("Clean"); highlighted: true; enabled: page.canClean; onClicked: page.runRoutine(modelData) }
+                    ActionButton { text: qsTr("Delete"); flat: true; onClicked: page.deleteRoutine(modelData) }
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                TextField {
+                    id: routineName
+                    Layout.fillWidth: true
+                    placeholderText: page.selected.length ? qsTr("Name for %1").arg(page.roomNames(page.selected)) : qsTr("Pick rooms above, then name the routine")
+                    enabled: page.selected.length > 0
+                    onAccepted: if (text.trim()) page.saveRoutine(text.trim())
+                }
+                ActionButton {
+                    text: qsTr("Save as routine")
+                    enabled: page.selected.length > 0 && routineName.text.trim() !== ""
+                    onClicked: page.saveRoutine(routineName.text.trim())
+                }
+            }
+        }
+
+        Panel {
             title: qsTr("Names")
             Layout.fillWidth: true
             visible: page.rooms.length > 0
@@ -127,6 +199,7 @@ ScrollView {
             Repeater {
                 model: page.rooms
                 RowLayout {
+                    id: roomRow
                     required property var modelData
                     Layout.fillWidth: true
                     spacing: 12
@@ -136,6 +209,23 @@ ScrollView {
                         text: modelData.name || ""
                         placeholderText: qsTr("Name, e.g. Kitchen")
                         onEditingFinished: if (text !== (modelData.name || "")) page.rename(modelData.id, text)
+                    }
+                    Label { text: qsTr("Passes"); color: Ui.muted }
+                    Row {
+                        spacing: 2
+                        Repeater {
+                            model: [["auto", qsTr("Auto")], ["one", qsTr("One")], ["two", qsTr("Two")]]
+                            ActionButton {
+                                required property var modelData
+                                readonly property var room: roomRow.modelData
+                                text: modelData[1]
+                                checkable: true
+                                checked: room && room.passes === modelData[0]
+                                highlighted: checked
+                                flat: !checked
+                                onClicked: page.setPasses(room.id, modelData[0])
+                            }
+                        }
                     }
                     Label { text: modelData.type === "zid" ? qsTr("zone") : qsTr("room"); color: Ui.muted }
                     ActionButton { text: qsTr("Forget"); flat: true; onClicked: page.forget(modelData.id) }

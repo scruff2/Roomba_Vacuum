@@ -41,6 +41,10 @@ ScrollView {
             return r && r.name ? r.name : qsTr("Room %1").arg(id);
         });
         if (roomNames.length) conds.unshift(qsTr("only %1").arg(roomNames.join(" → ")));
+        if (c.routineId) {
+            const rt = (daemon.status.routines || []).find((x) => x.id === c.routineId);
+            conds.unshift(rt ? qsTr("routine “%1”").arg(rt.name) : qsTr("missing routine"));
+        }
         if (rule.type === "schedule") {
             const names = Fmt.dayNames();
             const days = c.days && c.days.length && c.days.length < 7 ? c.days.map((d) => names[d]).join(", ") : qsTr("every day");
@@ -197,7 +201,8 @@ ScrollView {
                         { key: "finished", label: qsTr("Cleaning finished, with a summary") },
                         { key: "lowBattery", label: qsTr("Battery low away from the dock") },
                         { key: "offline", label: qsTr("Robot unreachable for 10 minutes") },
-                        { key: "automation", label: qsTr("An automation started or docked the robot") }
+                        { key: "automation", label: qsTr("An automation started or docked the robot") },
+                        { key: "maintenance", label: qsTr("Maintenance is due") }
                     ]
                     CheckBox {
                         required property var modelData

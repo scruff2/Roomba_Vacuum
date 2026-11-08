@@ -57,6 +57,8 @@ ScrollView {
             ActionButton { text: qsTr("Refresh counters"); enabled: !page.refreshing && daemon.online; onClicked: page.refreshCounters() }
         }
 
+        MaintenancePanel { Layout.fillWidth: true }
+
         GridLayout {
             Layout.fillWidth: true
             columns: page.width > 1000 ? 3 : page.width > 640 ? 2 : 1

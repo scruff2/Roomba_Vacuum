@@ -108,6 +108,7 @@ function validate (a) {
   const c = a.config || {};
   if (a.type === 'schedule' && parseHM(c.time) == null) throw new Error('schedule needs time as HH:MM');
   if (c.days && (!Array.isArray(c.days) || c.days.some((d) => !Number.isInteger(d) || d < 0 || d > 6))) throw new Error('days must be 0-6');
+  if (c.routineId != null && typeof c.routineId !== 'string') throw new Error('routineId must be a string');
   if (c.rooms && (!Array.isArray(c.rooms) || c.rooms.some((r) => typeof r !== 'string'))) throw new Error('rooms must be a list of room ids');
   return true;
 }

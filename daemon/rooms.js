@@ -18,6 +18,19 @@ function extractRooms (cmd) {
 
 const EMPTY = { pmapId: null, version: null, template: {}, rooms: [] };
 
+// Per-room cleaning passes, in the form the app sends them with each room.
+const PASSES = {
+  auto: { noAutoPasses: false, twoPass: false },
+  one: { noAutoPasses: true, twoPass: false },
+  two: { noAutoPasses: true, twoPass: true }
+};
+function passesOf (params) {
+  if (!params) return null;
+  return !params.noAutoPasses ? 'auto' : params.twoPass ? 'two' : 'one';
+}
+// The passes a room will be cleaned with: the user's choice in Sweep, else what the app last sent.
+function roomPasses (room) { return room.passes || passesOf(room.params); }
+
 // Only commands from the iRobot app teach us anything. Our own commands come
 // back as lastCommand too, and must not overwrite what the app sent, since
 // the app uses the map version the robot accepts.
@@ -59,7 +72,8 @@ function buildCleanArgs (store, pmaps, ids, { ordered = true } = {}) {
     const room = store.rooms.find((r) => r.id === String(id));
     if (!room) throw new Error(`unknown room ${id}`);
     // The app sends each room's cleaning settings (passes) with it; do the same.
-    return room.params ? { params: room.params, region_id: room.id, type: room.type } : { region_id: room.id, type: room.type };
+    const params = room.passes ? PASSES[room.passes] : room.params;
+    return params ? { params, region_id: room.id, type: room.type } : { region_id: room.id, type: room.type };
   });
   // Use the map version the iRobot app last used. The robot saves newer
   // versions locally after each clean but rejects them (error 224) until
@@ -68,9 +82,19 @@ function buildCleanArgs (store, pmaps, ids, { ordered = true } = {}) {
   return { ...(store.template || {}), ordered: ordered ? 1 : 0, pmap_id: store.pmapId, user_pmapv_id: version, regions };
 }
 
+// Saved room sets, e.g. "Downstairs evening: Kitchen -> Hallway".
+function validateRoutine (r, store) {
+  if (!r || typeof r.name !== 'string' || !r.name.trim()) throw new Error('routine needs a name');
+  if (!Array.isArray(r.rooms) || !r.rooms.length) throw new Error('routine needs at least one room');
+  for (const id of r.rooms) {
+    if (!store || !store.rooms.some((x) => x.id === String(id))) throw new Error(`unknown room ${id}`);
+  }
+  return { name: r.name.trim(), rooms: r.rooms.map(String) };
+}
+
 function roomName (store, id) {
   const r = store && store.rooms && store.rooms.find((x) => x.id === String(id));
   return r ? (r.name || `Room ${r.id}`) : `Room ${id}`;
 }
 
-module.exports = { isFromApp, extractRooms, mergeRooms, buildCleanArgs, currentVersion, roomName, EMPTY };
+module.exports = { PASSES, passesOf, roomPasses, validateRoutine, isFromApp, extractRooms, mergeRooms, buildCleanArgs, currentVersion, roomName, EMPTY };

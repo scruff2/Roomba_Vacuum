@@ -12,6 +12,7 @@ Dialog {
     property var days: [0, 1, 2, 3, 4, 5, 6]
     property var rooms: []          // room ids, in cleaning order; empty = whole house
     readonly property var knownRooms: daemon.status.rooms || []
+    readonly property var routines: daemon.status.routines || []
 
     modal: true
     anchors.centerIn: Overlay.overlay
@@ -32,6 +33,7 @@ Dialog {
         delay.value = c.delayMin != null ? c.delayMin : 10;
         arriveAction.currentIndex = c.action === "pause" ? 1 : 0;
         rooms = c.rooms ? c.rooms.slice() : [];
+        routineBox.currentIndex = c.routineId ? Math.max(0, dlg.routines.findIndex((x) => x.id === c.routineId) + 1) : 0;
         error.text = "";
         open();
         nameField.forceActiveFocus();
@@ -44,7 +46,8 @@ Dialog {
         if (type === "away") config.delayMin = delay.value;
         if (type === "arrive") config.action = arriveAction.currentIndex === 1 ? "pause" : "dock";
         if (type !== "arrive") {
-            if (rooms.length) config.rooms = rooms.slice();
+            if (routineBox.currentIndex > 0) config.routineId = dlg.routines[routineBox.currentIndex - 1].id;
+            else if (rooms.length) config.rooms = rooms.slice();
             if (minBattery.value) config.minBattery = minBattery.value;
             if (skipHours.value) config.skipIfCleanedWithinH = skipHours.value;
             if (onlyAway.checked && type === "schedule") config.onlyWhenAway = true;
@@ -125,9 +128,19 @@ Dialog {
             ComboBox { id: arriveAction; model: [qsTr("Send it to the dock"), qsTr("Pause it")]; Layout.fillWidth: true }
         }
 
-        // What to clean
+        // What to clean: a saved routine, or rooms picked here
+        RowLayout {
+            visible: typeBox.currentIndex !== 2 && dlg.routines.length > 0
+            Layout.fillWidth: true
+            Label { text: qsTr("Routine"); color: Ui.muted; Layout.preferredWidth: 110 }
+            ComboBox {
+                id: routineBox
+                Layout.fillWidth: true
+                model: [qsTr("None (pick rooms below)")].concat(dlg.routines.map((x) => x.name))
+            }
+        }
         ColumnLayout {
-            visible: typeBox.currentIndex !== 2 && dlg.knownRooms.length > 0
+            visible: typeBox.currentIndex !== 2 && dlg.knownRooms.length > 0 && routineBox.currentIndex === 0
             Layout.fillWidth: true
             Label { text: qsTr("Clean (pick rooms in order, or none for the whole house)"); color: Ui.muted; Layout.topMargin: 6 }
             Flow {

@@ -5,6 +5,7 @@
         <file alias="Ui.qml">Ui.qml</file>
         <file alias="Format.js">Format.js</file>
         <file alias="Panel.qml">Panel.qml</file>
+        <file alias="MaintenancePanel.qml">MaintenancePanel.qml</file>
         <file alias="ActionButton.qml">ActionButton.qml</file>
         <file alias="StatLine.qml">StatLine.qml</file>
         <file alias="BigNumber.qml">BigNumber.qml</file>

@@ -18,8 +18,9 @@ const { Presence } = require('./presence');
 const { Alerts } = require('./alerts');
 const describe = require('./describe');
 const rooms = require('./rooms');
+const maintenance = require('./maintenance');
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 const PORT = Number(process.env.SWEEP_PORT) || 8099;
 const CONFIG = process.env.SWEEP_CONFIG || path.join(os.homedir(), '.config', 'sweep', 'config.json');
 const DB = process.env.SWEEP_DB || path.join(os.homedir(), '.local', 'share', 'sweep', 'sweep.db');
@@ -57,6 +58,26 @@ function record (kind, message, data) {
 }
 
 function roomStore () { return store.get('rooms', rooms.EMPTY); }
+function routines () { return store.get('routines', []); }
+function maintRecords () { return store.get('maintenance', {}); }
+
+// Start counting maintenance from the first time we see the counters, then
+// announce items as they come due (once each, until marked done).
+function checkMaintenance () {
+  const { records, changed } = maintenance.ensureBaselines(maintRecords(), robot.state);
+  let recs = records;
+  const due = maintenance.newlyDue(recs, robot.state);
+  for (const item of due) {
+    recs = { ...recs, [item.key]: { ...recs[item.key], notifiedAt: Date.now() } };
+    record('maintenance', `Maintenance due: ${item.label}`, { key: item.key });
+  }
+  if (changed || due.length) store.set('maintenance', recs);
+  if (due.length) {
+    alerts.send('maintenance', due.length === 1 ? 'Maintenance due' : `${due.length} maintenance items due`,
+      due.map((d) => d.label).join(' · '), { cooldownMs: 0 });
+    pushStatus();
+  }
+}
 
 // Learn rooms from room cleans the iRobot app starts (see rooms.js).
 let lastSeenCommandTime = null;
@@ -90,7 +111,9 @@ function statusPayload () {
     quietNow: inQuietHours(Date.now(), quiet()),
     next: nextScheduled(store.automations(), Date.now()),
     countersUpdated: robot.lastFullAt || null,
-    rooms: roomStore().rooms.map((r) => ({ id: r.id, type: r.type, name: r.name }))
+    rooms: roomStore().rooms.map((r) => ({ id: r.id, type: r.type, name: r.name, passes: rooms.roomPasses(r) })),
+    routines: routines(),
+    maintenanceDue: maintenance.status(maintRecords(), robot.state).filter((x) => x.due).map((x) => ({ key: x.key, label: x.label }))
   });
 }
 
@@ -123,6 +146,7 @@ async function finishMission (m) {
     // This firmware never updates the live mission timer locally; the
     // lifetime cleaning-time counter does advance, so use its difference.
     if (!m.missionMinutes && m.stats.cleanMinutes) m.missionMinutes = m.stats.cleanMinutes;
+    checkMaintenance();
     store.saveMission(m);
   } catch (e) { log.error('counter refresh failed:', e.message); }
   broadcast('mission', missionSummary(m));
@@ -174,6 +198,8 @@ robot.on('update', (reported, state) => {
 });
 
 let offlineSince = null;
+robot.on('full', () => { try { checkMaintenance(); } catch (e) { log.error('maintenance check failed:', e.message); } });
+
 robot.on('connection', (up) => {
   if (up) {
     if (offlineSince && Date.now() - offlineSince > 60000) record('connection', 'Robot connection restored');
@@ -210,7 +236,10 @@ async function tick () {
   for (const { rule, action, reason } of fired) {
     store.markAutomationRun(rule.id, ctx.now);
     try {
-      const roomIds = action === 'start' && rule.config && Array.isArray(rule.config.rooms) ? rule.config.rooms : [];
+      const cfg = rule.config || {};
+      const routine = cfg.routineId ? routines().find((x) => x.id === cfg.routineId) : null;
+      if (cfg.routineId && !routine) throw new Error('its routine no longer exists');
+      const roomIds = action !== 'start' ? [] : routine ? routine.rooms : Array.isArray(cfg.rooms) ? cfg.rooms : [];
       if (roomIds.length) await robot.cleanRooms(rooms.buildCleanArgs(roomStore(), robot.state.pmaps, roomIds, { ordered: true }));
       else await robot.command(action);
       const what = roomIds.length ? `cleaning ${roomIds.map((id) => rooms.roomName(roomStore(), id)).join(', ')}` : action;
@@ -260,13 +289,17 @@ route('POST', /^\/api\/cmd\/(\w+)$/, async (req, body, [cmd]) => {
 route('POST', /^\/api\/refresh$/, async () => { await robot.refresh(); pushStatus(); return { ok: true, countersUpdated: robot.lastFullAt }; });
 route('GET', /^\/api\/rooms$/, () => {
   const r = roomStore();
-  return { ...r, currentVersion: rooms.currentVersion(robot.state.pmaps, r.pmapId), maps: robot.state.pmaps || [] };
+  return { ...r, rooms: r.rooms.map((x) => ({ ...x, passes: rooms.roomPasses(x) })), currentVersion: rooms.currentVersion(robot.state.pmaps, r.pmapId), maps: robot.state.pmaps || [] };
 });
 route('PUT', /^\/api\/rooms\/([\w-]+)$/, (req, body, [id]) => {
   const r = roomStore();
   const room = r.rooms.find((x) => x.id === id);
   if (!room) throw Object.assign(new Error('unknown room'), { status: 404 });
-  room.name = String(body.name || '').trim() || null;
+  if ('name' in body) room.name = String(body.name || '').trim() || null;
+  if ('passes' in body) {
+    if (body.passes !== null && !rooms.PASSES[body.passes]) throw new Error('passes must be auto, one or two');
+    room.passes = body.passes || undefined;
+  }
   store.set('rooms', r);
   // A room is usually named while its first clean is still running; fix that mission's label too.
   const cur = tracker.current;
@@ -274,9 +307,10 @@ route('PUT', /^\/api\/rooms\/([\w-]+)$/, (req, body, [id]) => {
     cur.rooms = cur.rooms.map((x) => (x.id === id ? { ...x, name: rooms.roomName(r, id) } : x));
     store.saveMission(cur);
   }
-  record('rooms', `Room #${id} named “${room.name || ''}”`);
+  if ('name' in body) record('rooms', `Room #${id} named “${room.name || ''}”`);
+  if ('passes' in body) record('rooms', `${rooms.roomName(r, id)}: ${rooms.roomPasses(room) || 'default'} pass${rooms.roomPasses(room) === 'one' ? '' : 'es'}`);
   pushStatus();
-  return r;
+  return { ...r, rooms: r.rooms.map((x) => ({ ...x, passes: rooms.roomPasses(x) })) };
 });
 route('DELETE', /^\/api\/rooms\/([\w-]+)$/, (req, body, [id]) => {
   const r = roomStore();
@@ -285,11 +319,54 @@ route('DELETE', /^\/api\/rooms\/([\w-]+)$/, (req, body, [id]) => {
   pushStatus();
   return r;
 });
-route('POST', /^\/api\/rooms\/clean$/, async (req, body) => {
-  const args = rooms.buildCleanArgs(roomStore(), robot.state.pmaps, body.rooms, { ordered: body.ordered !== false });
+route('POST', /^\/api\/rooms\/clean$/, (req, body) => cleanRoomList(body.rooms || []));
+async function cleanRoomList (ids, label) {
+  const args = rooms.buildCleanArgs(roomStore(), robot.state.pmaps, ids, { ordered: true });
   await robot.cleanRooms(args);
-  record('command', `Cleaning ${body.rooms.map((id) => rooms.roomName(roomStore(), id)).join(', ')}`, { rooms: body.rooms });
+  record('command', `${label ? `${label}: ` : ''}cleaning ${ids.map((id) => rooms.roomName(roomStore(), id)).join(' → ')}`, { rooms: ids });
   return { ok: true, args };
+}
+route('GET', /^\/api\/routines$/, () => routines());
+route('POST', /^\/api\/routines$/, (req, body) => {
+  const r = rooms.validateRoutine(body, roomStore());
+  const list = routines();
+  const id = `r${Date.now().toString(36)}`;
+  list.push({ id, ...r });
+  store.set('routines', list);
+  record('routine', `Saved routine “${r.name}”`);
+  pushStatus();
+  return { id };
+});
+route('PUT', /^\/api\/routines\/([\w-]+)$/, (req, body, [id]) => {
+  const list = routines();
+  const i = list.findIndex((x) => x.id === id);
+  if (i < 0) throw Object.assign(new Error('unknown routine'), { status: 404 });
+  list[i] = { id, ...rooms.validateRoutine(body, roomStore()) };
+  store.set('routines', list);
+  pushStatus();
+  return list[i];
+});
+route('DELETE', /^\/api\/routines\/([\w-]+)$/, (req, body, [id]) => {
+  store.set('routines', routines().filter((x) => x.id !== id));
+  pushStatus();
+  return { ok: true };
+});
+route('POST', /^\/api\/routines\/([\w-]+)\/clean$/, async (req, body, [id]) => {
+  const r = routines().find((x) => x.id === id);
+  if (!r) throw Object.assign(new Error('unknown routine'), { status: 404 });
+  return cleanRoomList(r.rooms, r.name);
+});
+route('GET', /^\/api\/maintenance$/, () => maintenance.status(maintRecords(), robot.state));
+route('POST', /^\/api\/maintenance\/(\w+)\/done$/, (req, body, [key]) => {
+  store.set('maintenance', maintenance.markDone(maintRecords(), key, robot.state));
+  record('maintenance', `Done: ${maintenance.ITEMS.find((i) => i.key === key).label}`);
+  pushStatus();
+  return maintenance.status(maintRecords(), robot.state);
+});
+route('PUT', /^\/api\/maintenance\/(\w+)$/, (req, body, [key]) => {
+  store.set('maintenance', maintenance.setInterval(maintRecords(), key, body.interval));
+  pushStatus();
+  return maintenance.status(maintRecords(), robot.state);
 });
 route('GET', /^\/api\/missions$/, (req, body, m, q) => store.missions({ limit: Number(q.get('limit')) || 100, since: Number(q.get('since')) || 0 }).map(missionSummary));
 route('GET', /^\/api\/missions\/([\w-]+)$/, (req, body, [id]) => {

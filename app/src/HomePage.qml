@@ -143,6 +143,43 @@ ScrollView {
                 spacing: 16
 
                 Panel {
+                    title: qsTr("Routines")
+                    Layout.fillWidth: true
+                    visible: (daemon.status.routines || []).length > 0
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Repeater {
+                            model: daemon.status.routines || []
+                            ActionButton {
+                                required property var modelData
+                                text: modelData.name
+                                enabled: !!page.s.connected && !page.s.active
+                                ToolTip.visible: hovered
+                                ToolTip.text: modelData.rooms.map((id) => {
+                                    const r = (page.s.rooms || []).find((x) => x.id === id);
+                                    return r && r.name ? r.name : qsTr("Room %1").arg(id);
+                                }).join(" → ")
+                                onClicked: daemon.send("POST", "/api/routines/" + modelData.id + "/clean", {}, (ok, d) => {
+                                    window.toast(ok ? qsTr("Started “%1”").arg(modelData.name) : qsTr("Couldn't start: %1").arg(d.error), !ok);
+                                })
+                            }
+                        }
+                    }
+                }
+
+                Panel {
+                    title: qsTr("Maintenance due")
+                    Layout.fillWidth: true
+                    visible: (page.s.maintenanceDue || []).length > 0
+                    Repeater {
+                        model: page.s.maintenanceDue || []
+                        Label { required property var modelData; text: "• " + modelData.label; color: Ui.warn }
+                    }
+                    ActionButton { text: qsTr("Open Health to mark done"); flat: true; onClicked: window.pageIndex = 5 }
+                }
+
+                Panel {
                     title: qsTr("This mission")
                     Layout.fillWidth: true
                     visible: !!page.s.active

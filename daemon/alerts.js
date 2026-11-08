@@ -3,7 +3,7 @@
 
 const { execFile } = require('child_process');
 
-const DEFAULTS = { stuck: true, binFull: true, finished: true, lowBattery: true, offline: true, automation: true };
+const DEFAULTS = { stuck: true, binFull: true, finished: true, lowBattery: true, offline: true, automation: true, maintenance: true };
 
 class Alerts {
   constructor (store, log = console) {
