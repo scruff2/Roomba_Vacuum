@@ -22,11 +22,12 @@ ApplicationWindow {
 
     readonly property var pages: [
         { title: qsTr("Home"), key: "1" },
-        { title: qsTr("Rooms"), key: "2" },
-        { title: qsTr("History"), key: "3" },
-        { title: qsTr("Automations"), key: "4" },
-        { title: qsTr("Settings"), key: "5" },
-        { title: qsTr("Health"), key: "6" }
+        { title: qsTr("Map"), key: "2" },
+        { title: qsTr("Rooms"), key: "3" },
+        { title: qsTr("History"), key: "4" },
+        { title: qsTr("Automations"), key: "5" },
+        { title: qsTr("Settings"), key: "6" },
+        { title: qsTr("Health"), key: "7" }
     ]
 
     // Messages from pages and commands, shown briefly at the bottom.
@@ -54,6 +55,7 @@ ApplicationWindow {
     Shortcut { sequence: "4"; context: Qt.ApplicationShortcut; onActivated: window.pageIndex = 3 }
     Shortcut { sequence: "5"; context: Qt.ApplicationShortcut; onActivated: window.pageIndex = 4 }
     Shortcut { sequence: "6"; context: Qt.ApplicationShortcut; onActivated: window.pageIndex = 5 }
+    Shortcut { sequence: "7"; context: Qt.ApplicationShortcut; onActivated: window.pageIndex = 6 }
     Shortcut {
         sequence: "Space"; context: Qt.ApplicationShortcut; enabled: window.canCommand
         onActivated: daemon.command(window.phase === "run" ? "pause" : "start")
@@ -185,6 +187,7 @@ ApplicationWindow {
                     Layout.rightMargin: 12
                     currentIndex: window.pageIndex
                     HomePage {}
+                    MapPage {}
                     RoomsPage {}
                     HistoryPage {}
                     AutomationsPage {}
@@ -239,8 +242,8 @@ ApplicationWindow {
                             ["D", qsTr("Send to dock")],
                             ["F", qsTr("Find robot (plays a sound)")],
                             ["E", qsTr("Empty bin into the base")],
-                            ["1 – 6", qsTr("Switch page")],
-                            ["C", qsTr("Clean picked rooms (Rooms page)")],
+                            ["1 – 7", qsTr("Switch page")],
+                            ["C", qsTr("Clean picked rooms (Map and Rooms pages)")],
                             ["N", qsTr("New automation (Automations page)")],
                             ["?", qsTr("Show or hide this list")],
                             ["Q", qsTr("Quit")]

@@ -20,8 +20,10 @@ const describe = require('./describe');
 const rooms = require('./rooms');
 const maintenance = require('./maintenance');
 const insights = require('./insights');
+const { Cloud } = require('./cloud');
+const umf = require('./umf');
 
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 const PORT = Number(process.env.SWEEP_PORT) || 8099;
 const CONFIG = process.env.SWEEP_CONFIG || path.join(os.homedir(), '.config', 'sweep', 'config.json');
 const DB = process.env.SWEEP_DB || path.join(os.homedir(), '.local', 'share', 'sweep', 'sweep.db');
@@ -44,6 +46,9 @@ try {
 } catch (e) { configError = `${CONFIG}: ${e.message}`; log.error(configError); }
 
 const robot = new Robot(cfg || {}, log);
+// iRobot cloud access, for the map only; set up with bin/sweep-cloud-login.
+const cloud = cfg && cfg.cloudEmail ? new Cloud({ email: cfg.cloudEmail, country: cfg.cloudCountry || 'US', log }) : null;
+const CLOUD_CACHE = path.join(path.dirname(DB), 'cloud');
 
 // ---------- broadcasting ----------
 function broadcast (event, data) {
@@ -60,6 +65,88 @@ function record (kind, message, data) {
 
 function safeWarnings () { try { return currentWarnings(); } catch (e) { return []; } }
 function roomStore () { return store.get('rooms', rooms.EMPTY); }
+
+// ---------- map (from iRobot's cloud) ----------
+function mapData () { return store.get('map', null); }
+function mapView () { return { rotate: 0, mirror: false, ...store.get('mapView', {}) }; }
+
+// Make every room and zone on the map known to Sweep, named as in the
+// iRobot app, and use the map version the app uses for room cleans.
+function syncRoomsFromMap (map, pmapId, userVersion) {
+  const r = roomStore();
+  const s = { ...rooms.EMPTY, ...r, rooms: [...(r.rooms || [])] };
+  if (s.pmapId && s.pmapId !== pmapId) s.rooms = [];
+  s.pmapId = pmapId;
+  if (userVersion) s.version = userVersion;
+  const st = robot.state;
+  const defaultParams = st.noAutoPasses != null ? { noAutoPasses: !!st.noAutoPasses, twoPass: !!st.twoPass } : null;
+  const changes = [];
+  for (const area of [...map.rooms.map((x) => ({ ...x, type: 'rid' })), ...map.zones.map((x) => ({ ...x, type: 'zid' }))]) {
+    let room = s.rooms.find((x) => rooms.roomKey(x) === area.key);
+    if (!room) {
+      room = { id: area.id, type: area.type, name: area.name || null, params: defaultParams, seenAt: Date.now() };
+      s.rooms.push(room);
+      changes.push(`added ${area.name || area.key}`);
+    } else if (area.name && room.name !== area.name) { changes.push(`${room.name || area.key} → ${area.name}`); room.name = area.name; }
+  }
+  store.set('rooms', s);
+  if (changes.length) record('rooms', `Rooms updated from the map: ${changes.join(', ')}`);
+}
+
+let mapRefreshing = null;
+async function refreshMap ({ force = false } = {}) {
+  if (!cloud) return null;
+  if (mapRefreshing) return mapRefreshing;
+  mapRefreshing = (async () => {
+    const list = await cloud.pmaps(cfg.blid);
+    const known = roomStore().pmapId;
+    const p = list.find((x) => x.pmap_id === known) || list[0];
+    if (!p) throw new Error('no saved map in the iRobot account');
+    let map = mapData();
+    if (force || !map || map.id !== p.pmap_id || map.version !== p.active_pmapv_id) {
+      map = { ...umf.parseMap(await cloud.umf(cfg.blid, p.pmap_id, p.active_pmapv_id)), fetchedAt: Date.now() };
+      store.set('map', map);
+      log.info(`map ${map.name} ${map.version} loaded`);
+    }
+    syncRoomsFromMap(map, p.pmap_id, p.user_pmapv_id);
+    await refreshHistory();
+    broadcast('map', { version: map.version });
+    pushStatus();
+    return map;
+  })().finally(() => { mapRefreshing = null; });
+  return mapRefreshing;
+}
+
+// Attach each cloud mission record (map version, area) to Sweep's mission.
+async function refreshHistory () {
+  const history = await cloud.missionHistory(cfg.blid, 40);
+  const missions = store.missions({ limit: 200 });
+  for (const [id, rec] of umf.matchHistory(missions, history)) {
+    const m = missions.find((x) => x.id === id);
+    const changed = JSON.stringify(m.cloud) !== JSON.stringify(rec) || (rec.sqft && !m.sqft);
+    if (!changed) continue;
+    m.cloud = rec;
+    if (rec.sqft && !m.sqft) m.sqft = rec.sqft;
+    store.saveMission(m);
+  }
+}
+
+async function coverageFor (missionId) {
+  const m = store.mission(missionId);
+  if (!m) throw Object.assign(new Error('unknown mission'), { status: 404 });
+  if (!m.cloud || !m.cloud.version) throw Object.assign(new Error('no cloud map for this mission yet'), { status: 404 });
+  const file = path.join(CLOUD_CACHE, `coverage-${m.cloud.version}.json`);
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) {}
+  const cov = umf.parseCoverage(await cloud.umf(cfg.blid, m.cloud.pmapId, m.cloud.version));
+  fs.mkdirSync(CLOUD_CACHE, { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(cov));
+  return cov;
+}
+
+function mapRefreshSoon (delayMs) {
+  if (!cloud) return;
+  setTimeout(() => refreshMap().catch((e) => log.error('map refresh failed:', e.message)), delayMs);
+}
 function routines () { return store.get('routines', []); }
 function maintRecords () { return store.get('maintenance', {}); }
 
@@ -100,9 +187,16 @@ function captureRooms (cmd) {
 
 function quiet () { return store.get('quiet', { enabled: false, start: '22:00', end: '08:00' }); }
 
+// Rooms are shown with their current names (they may have been renamed since).
+function withRoomNames (m) {
+  if (!m || !Array.isArray(m.rooms)) return m;
+  const st = roomStore();
+  return { ...m, rooms: m.rooms.map((r) => ({ ...r, name: rooms.findRoom(st, r.id) ? rooms.roomName(st, r.id) : r.name })) };
+}
+
 function missionSummary (m) {
   if (!m) return null;
-  const { countersStart, countersEnd, ...rest } = m;
+  const { countersStart, countersEnd, ...rest } = withRoomNames(m);
   return rest;
 }
 
@@ -118,6 +212,7 @@ function statusPayload () {
     countersUpdated: robot.lastFullAt || null,
     rooms: roomStore().rooms.map((r) => ({ id: rooms.roomKey(r), type: r.type, name: r.name, passes: rooms.roomPasses(r) })),
     routines: routines(),
+    map: cloud ? { configured: true, name: (mapData() || {}).name || null, version: (mapData() || {}).version || null, error: cloud.lastError } : { configured: false },
     warnings: safeWarnings().map((w) => ({ key: w.key, level: w.level, title: w.title })),
     maintenanceDue: maintenance.status(maintRecords(), robot.state).filter((x) => x.due).map((x) => ({ key: x.key, label: x.label }))
   });
@@ -156,6 +251,8 @@ async function finishMission (m) {
     store.saveMission(m);
   } catch (e) { log.error('counter refresh failed:', e.message); }
   reviewAndFollowUp(m);
+  // The cloud gets the mission's map and coverage a little after it ends.
+  mapRefreshSoon(3 * 60000);
   broadcast('mission', missionSummary(m));
   const st = m.stats || {};
   const mins = m.missionMinutes || Math.round((m.end - m.start) / 60000);
@@ -472,6 +569,31 @@ route('POST', /^\/api\/routines\/([\w-]+)\/clean$/, async (req, body, [id]) => {
   if (!r) throw Object.assign(new Error('unknown routine'), { status: 404 });
   return cleanRoomList(r.rooms, r.name);
 });
+route('GET', /^\/api\/map$/, () => {
+  const missions = store.missions({ limit: 40 }).filter((m) => m.end && m.cloud && m.cloud.version)
+    .map(withRoomNames).map((m) => ({ id: m.id, start: m.start, rooms: m.rooms || [], result: m.result, verdict: m.review ? m.review.verdict : null, sqft: m.sqft || null }));
+  return {
+    cloud: cloud ? cloud.status() : { configured: false },
+    map: mapData(),
+    view: mapView(),
+    rooms: roomStore().rooms.map((r) => ({ key: rooms.roomKey(r), type: r.type, name: r.name, passes: rooms.roomPasses(r) })),
+    missions
+  };
+});
+route('POST', /^\/api\/map\/refresh$/, async () => {
+  if (!cloud) throw new Error('iRobot account not set up; run bin/sweep-cloud-login');
+  const map = await refreshMap({ force: true });
+  return { ok: true, version: map.version };
+});
+route('GET', /^\/api\/map\/coverage\/([\w-]+)$/, (req, body, [id]) => coverageFor(id));
+route('PUT', /^\/api\/map\/view$/, (req, body) => {
+  const v = { ...mapView() };
+  if (body.rotate != null) v.rotate = ((Math.round(Number(body.rotate)) % 4) + 4) % 4;
+  if (body.mirror != null) v.mirror = !!body.mirror;
+  store.set('mapView', v);
+  return v;
+});
+
 // Developer endpoints for research: the robot's full raw state, and a raw
 // settings write (a "delta"). Changes still require the X-Sweep header.
 route('GET', /^\/api\/raw$/, () => robot.state);
@@ -504,7 +626,7 @@ route('GET', /^\/api\/missions$/, (req, body, m, q) => store.missions({ limit: N
 route('GET', /^\/api\/missions\/([\w-]+)$/, (req, body, [id]) => {
   const m = store.mission(id);
   if (!m) throw Object.assign(new Error('not found'), { status: 404 });
-  return { ...m, samples: store.samples({ mission: id }) };
+  return { ...withRoomNames(m), samples: store.samples({ mission: id }) };
 });
 route('GET', /^\/api\/stats$/, (req, body, m, q) => {
   const days = Number(q.get('days')) || 90;
@@ -589,6 +711,9 @@ try { backfillReviews(); } catch (e) { log.error('review backfill failed:', e.me
 server.listen(PORT, '127.0.0.1', () => {
   log.info(`sweepd ${VERSION} listening on http://127.0.0.1:${PORT}`);
   if (cfg) robot.connect();
+  // Load the map shortly after start, then twice a day.
+  mapRefreshSoon(10000);
+  if (cloud) setInterval(() => refreshMap().catch((e) => log.error('map refresh failed:', e.message)), 12 * 3600000);
   presence.check().catch((e) => log.error(e));
 });
 

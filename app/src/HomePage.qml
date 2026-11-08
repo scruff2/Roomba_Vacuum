@@ -182,7 +182,7 @@ ScrollView {
                         model: page.s.maintenanceDue || []
                         Label { required property var modelData; text: "• " + modelData.label; color: Ui.warn }
                     }
-                    ActionButton { text: qsTr("Open Health"); flat: true; onClicked: window.pageIndex = 5 }
+                    ActionButton { text: qsTr("Open Health"); flat: true; onClicked: window.pageIndex = 6 }
                 }
 
                 Panel {

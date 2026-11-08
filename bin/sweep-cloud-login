@@ -1,0 +1,60 @@
+#!/usr/bin/env node
+// One-time setup for Sweep's map: stores your iRobot account password in the
+// system keyring (GNOME Keyring) and checks that it works. The password is
+// never written to a file or printed. The email is saved in
+// ~/.config/sweep/config.json so sweepd knows which keyring entry to use.
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const readline = require('readline');
+const { Cloud, keyringStore } = require('../daemon/cloud');
+
+const CONFIG = process.env.SWEEP_CONFIG || path.join(os.homedir(), '.config', 'sweep', 'config.json');
+
+function ask (q, hidden) {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  if (hidden) rl._writeToOutput = (s) => { if (s.startsWith(q)) rl.output.write(q); };
+  return new Promise((resolve) => rl.question(q, (a) => { rl.close(); if (hidden) process.stdout.write('\n'); resolve(hidden ? a : a.trim()); }));
+}
+
+(async () => {
+  const cfg = JSON.parse(fs.readFileSync(CONFIG, 'utf8'));
+  console.log('Sweep reads your map from iRobot\'s cloud (read-only). Your iRobot');
+  console.log('password goes into the system keyring, not a file.\n');
+  // Non-interactive mode for a graphical prompt:
+  //   pinentry ... | sweep-cloud-login --email you@example.com --password-stdin
+  // pinentry's "D <data>" line is percent-encoded (%25, %0A, %0D).
+  const argEmail = process.argv.includes('--email') ? process.argv[process.argv.indexOf('--email') + 1] : null;
+  const fromStdin = process.argv.includes('--password-stdin');
+  const email = argEmail || (await ask(`iRobot account email${cfg.cloudEmail ? ` [${cfg.cloudEmail}]` : ''}: `)) || cfg.cloudEmail;
+  if (!email || !email.includes('@')) { console.error('An email address is needed.'); process.exit(1); }
+  const password = fromStdin
+    ? fs.readFileSync(0, 'utf8').replace(/\r?\n$/, '').replace(/%([0-9A-Fa-f]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16)))
+    : await ask('iRobot account password (hidden): ', true);
+  if (!password) { console.error('No password entered.'); process.exit(1); }
+  console.log(`(received ${password.length} characters)`);
+
+  console.log('Checking the login with iRobot...');
+  const cloud = new Cloud({ email, country: cfg.cloudCountry || 'US', getPassword: async () => password });
+  let robots;
+  try {
+    robots = await cloud.login();
+  } catch (e) {
+    console.error(`Login failed: ${e.message}`);
+    console.error('Nothing was saved.');
+    process.exit(1);
+  }
+  const mine = robots[cfg.blid];
+  console.log(`Logged in. Robots on this account: ${Object.values(robots).map((r) => r.name).join(', ') || 'none'}`);
+  if (!mine) console.warn(`Warning: this account doesn't list the robot Sweep controls (${cfg.blid}).`);
+
+  await keyringStore(email, password);
+  cfg.cloudEmail = email;
+  // Rewrite atomically and keep the file private.
+  const tmp = CONFIG + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+  fs.renameSync(tmp, CONFIG);
+  console.log('Saved: password in the keyring, email in Sweep\'s config.');
+  console.log('Restart sweepd to load the map:  systemctl --user restart sweepd');
+})().catch((e) => { console.error(e.message); process.exit(1); });

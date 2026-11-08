@@ -3,8 +3,9 @@
 Local control for an iRobot Roomba (built for a j8+, "Vanilla Thunder"), with
 far more than the phone app: every mission recorded with its own stats,
 automations that know whether anyone's home, every setting the robot exposes,
-and a health view of the battery, sensors and firmware. Nothing goes through
-iRobot's cloud.
+a health view of the battery, sensors and firmware, and a map of your floor
+with click-to-clean and per-mission coverage. Control is entirely local; only
+the map is read (never written) from iRobot's cloud.
 
 ```
 sweepd (daemon/)     background service; owns the robot's single local connection,
@@ -25,6 +26,10 @@ tools/sniff.js       raw MQTT sniffer for research (stop sweepd first)
    systemd user service.
 3. `app/bin/install` builds the app and installs it as an Arch package (asks
    for your sudo password), so it shows up in the launcher (Super + Space).
+4. Optional, for the map: `bin/sweep-cloud-login` stores your iRobot account
+   password in GNOME Keyring (never in a file), then
+   `systemctl --user restart sweepd`. Sweep then loads the saved map, names
+   every room as in the iRobot app, and attaches each mission's coverage.
 
 ## The app
 
@@ -35,7 +40,8 @@ tools/sniff.js       raw MQTT sniffer for research (stop sweepd first)
 | D | Send to dock (pauses first if cleaning) |
 | F | Find robot (plays a sound) |
 | E | Empty bin into the base |
-| 1 – 5 | Home, History, Automations, Settings, Health |
+| 1 – 7 | Home, Map, Rooms, History, Automations, Settings, Health |
+| C | Clean the rooms picked on the Map or Rooms page, in order |
 | N | New automation (Automations page) |
 | ? | Show shortcuts |
 | Q | Quit |

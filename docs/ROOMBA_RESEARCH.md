@@ -157,10 +157,73 @@ Sweep learns a new accepted version.
 
 ## Cloud-only (not reachable locally)
 
-Creating or editing keep-out and clean zones; room names; maps as images and
-coverage; mission history with per-room timing; dirt detection; object
-photos; maintenance-part resets in the app. A future "cloud phase" would mean
-reverse-engineering the iRobot app's private API with the user's account.
+Creating or editing keep-out and clean zones; room names; maps and coverage;
+mission history with per-room timing; dirt detection; object photos;
+maintenance-part resets in the app. Sweep now **reads** maps and mission
+history from the cloud (below); it never writes there.
+
+## iRobot cloud: maps and mission history (working in Sweep)
+
+Implemented in `daemon/cloud.js` (client), `daemon/umf.js` (parser) and
+`bin/sweep-cloud-login` (setup). Confirmed on this account on 2026-11-08.
+
+**Login** (as the iRobot Home app does it; the password lives in GNOME
+Keyring, read with `secret-tool lookup service sweep account <email>`):
+
+1. `GET https://disc-prod.iot.irobotapi.com/v1/discover/endpoints?country_code=US`
+   → `deployments[current_deployment]` gives `httpBase`
+   (`https://unauth2.prod.iot.irobotapi.com`) and `httpBaseAuth`
+   (`https://auth2.prod.iot.irobotapi.com`); `gigya` gives `api_key` and
+   `datacenter_domain` (`us1.gigya.com`). Current deployment: `v007`.
+2. `POST https://accounts.us1.gigya.com/accounts.login` (form: apiKey,
+   loginID, password, targetEnv=mobile) → `UID`, `UIDSignature`,
+   `signatureTimestamp`. Error 403042 = wrong email/password, 403041 = account
+   temporarily locked: never retry those automatically.
+3. `POST {httpBase}/v2/login` with `{app_id, assume_robot_ownership: "0",
+   gigya: {signature, timestamp, uid}}` → `credentials` (AccessKeyId,
+   SecretKey, SessionToken, CognitoId, Expiration ≈ 1 h) and `robots`.
+4. Sign every request with AWS SigV4, service `execute-api`, region = the
+   part of `CognitoId` before the colon. Re-login on 403 (once); honour 429
+   `Retry-After`. There is no refresh token.
+
+**Read-only endpoints used** (all `GET {httpBaseAuth}`):
+
+| Endpoint | Returns |
+| --- | --- |
+| `/v1/{blid}/pmaps?visible=true&activeDetails=2` | Saved maps: `pmap_id`, `active_pmapv_id`, `user_pmapv_id` (the version the app uses for room cleans), room and zone names |
+| `/v1/{blid}/pmaps/{pmap}/versions/{ver}/umf?activeDetails=2` | The map in UMF 4.9.0 (below); every mission saves a new version |
+| `/v1/{blid}/missionhistory?app_id=…&filterType=omit_quickly_canceled_not_scheduled&supportedDoneCodes=dndEnd,returnHomeEnd&maxReports=N` | Recent missions: `startTime`, `done` (ok/cncl/stuck), `sqft`, `runM`, `dirt`, `evacs`, `pmaps_info[0].pmapv_id`, `odoaFeats` |
+
+Never call: part-counter resets, favourites, `/reset`, robot associations, or
+any map POST (rename/edit/delete).
+
+**UMF map format.** `maps[0]` has `map_header` (name, version, area m²,
+resolution 0.105 m, `user_orientation_rad`), `regions` (rooms: id, name,
+`region_type`, per-room `policies.odoa_mode`), `zones` (clean zones,
+`zone_type` e.g. `pet`), `keepoutzones`, `doors`, `borders` (`free` /
+`not_free`), `objects` (recognised furniture/appliances; `system.visible`
+false = iRobot hides it but the robot knows it), `observed_zones` (e.g.
+`around_litter_box`), `typed_poses.dock_poses`, and `layers`. Shapes list
+point ids that resolve through `points2d` (`{id, coordinates:[x, y]}`), in
+metres with the dock near the origin. Region ids equal the `region_id`s used
+in room cleans; zone ids are the `zid`s.
+
+**Coverage per mission.** Each mission's map version carries `layers`:
+`coverage` (multipoint2d of cleaned cells, `point_area` ≈ 0.105 m squares),
+`coverage_poly`, `dirt`, `clutter`, `escape_events` (optional),
+`operatingMode_coverage_poly`, `deltas`. Examples from 2026-11-08: Litter Box
+zone run 14 cells (0.2 m²), Hallway 347–841 cells.
+
+**Avoidance.** Each mission record's `odoaFeats` lists the camera-avoidance
+level per object class (`litter_box`, `pet_waste`, `cables`, `socks`, …;
+value 2 seen for most). The map knows a `litter_box` object in the Hallway
+and an `around_litter_box` observed zone, which likely explains the very short
+litter-box zone runs. Not yet tested: whether changing litter-box avoidance in
+the iRobot app changes that.
+
+**Open questions.** Orientation versus the iRobot app (Sweep offers rotate
+and mirror; ha_roomba_plus reports needing an x-mirror); whether the cloud
+offers object photos for the j-series.
 
 ## Tools in this repo
 
@@ -170,6 +233,8 @@ reverse-engineering the iRobot app's private API with the user's account.
 | `POST /api/raw/delta` (sweepd, needs `X-Sweep: 1`) | Raw settings write |
 | `tools/try-setting.js '<json>' [--keep]` | Write a setting, confirm the echo, restore the original |
 | `tools/sniff.js [secs] [--get] [--clean]` | Log every MQTT packet (stop sweepd first) |
+| `tools/cloud-fetch.js [outDir]` | Save raw cloud pmaps, UMF and mission history for inspection |
+| `GET /api/map`, `/api/map/coverage/:missionId`, `POST /api/map/refresh` | Parsed map, per-mission coverage, forced refresh |
 
 ## Next experiments
 
