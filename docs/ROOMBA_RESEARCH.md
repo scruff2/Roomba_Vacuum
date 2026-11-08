@@ -221,9 +221,12 @@ and an `around_litter_box` observed zone, which likely explains the very short
 litter-box zone runs. Not yet tested: whether changing litter-box avoidance in
 the iRobot app changes that.
 
-**Open questions.** Orientation versus the iRobot app (Sweep offers rotate
-and mirror; ha_roomba_plus reports needing an x-mirror); whether the cloud
-offers object photos for the j-series.
+**Orientation.** Drawn with x to the right and y up (no mirror, no rotation),
+the j8+ map matches the iRobot app exactly (confirmed 2026-11-08), unlike
+ha_roomba_plus's report of needing an x-mirror on other models. Sweep still
+offers rotate and mirror for other robots.
+
+**Open question.** Whether the cloud offers object photos for the j-series.
 
 ## Tools in this repo
 
