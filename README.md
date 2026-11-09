@@ -14,6 +14,7 @@ sweepd (daemon/)     background service; owns the robot's single local connectio
                      serves an API on 127.0.0.1:8099
 Sweep  (app/)        Qt Quick desktop app for Omarchy, talks to sweepd
 roomba.js            command-line client for sweepd
+mcp/sweep-mcp.js     MCP server so AI assistants (Claude etc.) can use Sweep
 tools/sniff.js       raw MQTT sniffer for research (stop sweepd first)
 ```
 
@@ -60,6 +61,25 @@ tools/sniff.js       raw MQTT sniffer for research (stop sweepd first)
 - Settings changes take about 5 s to be confirmed by the robot.
 
 Detailed findings, experiment results and next steps: [docs/ROOMBA_RESEARCH.md](docs/ROOMBA_RESEARCH.md).
+
+## AI assistants (MCP)
+
+`mcp/sweep-mcp.js` is an MCP server (no dependencies) that gives Claude Code,
+Claude Desktop or any MCP client a safe set of tools for Sweep: status, rooms
+and routines, recent cleans, stats, health, care items, automations, the
+activity log, and actions (clean rooms by name, run a routine, clean
+everywhere, pause, resume, go home, stop, find the robot, empty the bin, mark
+care done). Tools that send the robot out take `preview: true` to describe the
+plan without moving it. Raw robot settings are deliberately not exposed.
+
+- In this repo, Claude Code picks it up from `.mcp.json` (approve it once).
+- Everywhere else:
+  `claude mcp add --scope user sweep -- node /path/to/Roomba_Vacuum/mcp/sweep-mcp.js`
+- Other clients: run `node mcp/sweep-mcp.js` over stdio. `SWEEP_URL`
+  overrides the API address (default `http://127.0.0.1:8099`).
+
+Then ask things like "clean the kitchen and the litter box", "how did the
+last clean go?" or "is anything due for maintenance?".
 
 ## CLI
 

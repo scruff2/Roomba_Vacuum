@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Local Roomba control: sweepd service, Sweep desktop app, CLI",
   "scripts": {
-    "test": "node --test daemon/test/",
+    "test": "node --test daemon/test/ mcp/test/",
     "daemon": "node daemon/sweepd.js"
   },
   "keywords": [],
