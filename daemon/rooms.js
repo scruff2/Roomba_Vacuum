@@ -6,6 +6,13 @@
 
 // Pull the map and regions out of a reported lastCommand, or null if it
 // wasn't a room/zone clean.
+// The robot's lastCommand echo lists unused fields as null (e.g. "event":
+// null), and it silently drops a start command that carries one, so never
+// copy them into our commands.
+function dropNulls (o) {
+  return Object.fromEntries(Object.entries(o || {}).filter(([, v]) => v != null));
+}
+
 function extractRooms (cmd) {
   if (!cmd || cmd.command !== 'start' || !Array.isArray(cmd.regions) || !cmd.regions.length || !cmd.pmap_id) return null;
   const regions = cmd.regions
@@ -13,7 +20,7 @@ function extractRooms (cmd) {
     .map((r) => ({ id: String(r.region_id), type: r.type || 'rid', key: keyOf(r.type || 'rid', r.region_id), params: r.params || null }));
   // Keep any extra fields the firmware sent (e.g. params) so our commands match its shape.
   const { command, time, initiator, regions: _r, pmap_id: _p, user_pmapv_id: _v, ...extra } = cmd;
-  return { pmapId: cmd.pmap_id, version: cmd.user_pmapv_id || null, regions, template: extra, time: cmd.time || null, initiator: initiator || null };
+  return { pmapId: cmd.pmap_id, version: cmd.user_pmapv_id || null, regions, template: dropNulls(extra), time: cmd.time || null, initiator: initiator || null };
 }
 
 const EMPTY = { pmapId: null, version: null, template: {}, rooms: [] };
@@ -87,7 +94,7 @@ function buildCleanArgs (store, pmaps, ids, { ordered = true } = {}) {
   // versions locally after each clean but rejects them (error 224) until
   // they're synced; the app's version is the one it accepts.
   const version = store.version || currentVersion(pmaps, store.pmapId);
-  return { ...(store.template || {}), ordered: ordered ? 1 : 0, pmap_id: store.pmapId, user_pmapv_id: version, regions };
+  return { ...dropNulls(store.template), ordered: ordered ? 1 : 0, pmap_id: store.pmapId, user_pmapv_id: version, regions };
 }
 
 // Saved room sets, e.g. "Downstairs evening: Kitchen -> Hallway".

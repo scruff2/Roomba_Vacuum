@@ -29,6 +29,13 @@ test('extracts map, regions and extra fields', () => {
   assert.deepStrictEqual(seen.template, { ordered: 1, params: { noAutoPasses: true } });
 });
 
+test('null fields from the echo are never sent back (the robot drops the command)', () => {
+  const seen = extractRooms(appCommand(['3'], { event: null }));
+  assert.deepStrictEqual(seen.template, { ordered: 1 });
+  const store = { pmapId: 'P', version: 'V', template: { ordered: 1, event: null }, rooms: [{ id: '3', type: 'rid', name: 'Breakfast Room' }] };
+  assert.ok(!('event' in buildCleanArgs(store, [], ['3'])));
+});
+
 test('merging learns new rooms once and keeps names', () => {
   let { store, added } = mergeRooms(null, extractRooms(appCommand(['3'])));
   assert.deepStrictEqual(added, ['3']);

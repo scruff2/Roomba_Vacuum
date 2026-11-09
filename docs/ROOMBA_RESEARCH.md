@@ -93,6 +93,12 @@ that.
 - **Stuck map state:** after editing a clean zone, the robot once refused all
   room/zone cleans from both apps (error 224) and its `pmaps` list briefly went
   empty. **Restarting the robot fixed it.**
+- **A `null` field makes the robot drop a command (2026-11-08):** the
+  `lastCommand` echo lists unused fields as `null` (e.g. `"event": null`).
+  Sweep copied that into its room cleans, and the robot then dropped them
+  silently: no error, no `lastCommand` echo, with either map version, after a
+  robot restart too. The same command without the `null` field was accepted.
+  Sweep now strips `null` fields from anything it learns from the echo.
 - When a clean is requested, the robot briefly reports `cycle: "clean"` while
   still in `phase: "charge"`, even if it then refuses. A clean has only
   started once `phase` is `run` (or `hm*`). The same transient report carries

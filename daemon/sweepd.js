@@ -596,7 +596,8 @@ function cleanOutcome (timeoutMs = 10000) {
 // The robot accepts only some map versions: after a clean it saves a newer
 // local version it rejects, but after a map edit in the iRobot app it wants
 // the new one. Try the version learned from the app first; if the robot
-// refuses with error 224, retry once with its latest and remember what worked.
+// refuses (error 224) or ignores it, retry once with its latest and remember
+// what worked.
 async function cleanRoomList (ids, label, { passes } = {}) {
   const names = ids.map((id) => rooms.roomName(roomStore(), id)).join(' → ');
   const store0 = roomStore();
@@ -607,9 +608,15 @@ async function cleanRoomList (ids, label, { passes } = {}) {
     if (passes) args.regions = args.regions.map((r) => ({ ...r, params: rooms.PASSES[passes] }));
     await robot.cleanRooms(args);
     const outcome = await cleanOutcome();
+    // An out-of-date version is sometimes refused with 224 and sometimes
+    // silently ignored, so either way try the robot's latest before giving up.
+    if (outcome !== 'started' && i < versions.length - 1) {
+      log.info(`room clean ${outcome} with map ${version}; retrying with ${versions[i + 1]}`);
+      continue;
+    }
     if (outcome === 'ignored') {
       const noMap = !(robot.state.pmaps || []).length;
-      const why = noMap ? 'it currently reports no saved map (it may still be processing a map change)' : 'it gave no reason';
+      const why = noMap ? 'it currently reports no saved map (it may still be processing a map change)' : 'it ignored the request without an error';
       record('error', `The robot didn't start cleaning ${names}: ${why}. Try again in a few minutes, start it once from the iRobot app, or restart the robot.`, { rooms: ids });
       throw new Error(`the robot didn't start: ${why}`);
     }
@@ -617,11 +624,11 @@ async function cleanRoomList (ids, label, { passes } = {}) {
       if (version !== store0.version) {
         store.set('rooms', { ...roomStore(), version });
         record('rooms', `Map version updated to ${version}`);
+        syncRobotSchedules(); // stored schedules carry the version too
       }
       record('command', `${label ? `${label}: ` : ''}cleaning ${names}`, { rooms: ids, version });
       return { ok: true, args, outcome };
     }
-    if (i < versions.length - 1) log.info(`room clean refused with map ${version}; retrying with ${versions[i + 1]}`);
   }
   record('error', `The robot refused to clean ${names} (error 224, map out of date). Start one room clean from the iRobot app so Sweep can learn the current map; if the app is refused too, restart the robot.`, { rooms: ids });
   throw new Error('the robot refused (map out of date). Start one room clean from the iRobot app, or restart the robot if the app is refused too, then try again.');
