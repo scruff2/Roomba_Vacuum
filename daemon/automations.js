@@ -62,6 +62,8 @@ function evaluate (rules, ctx) {
     const p = ctx.presence || {};
 
     if (rule.type === 'schedule') {
+      // Schedules stored on the robot start by themselves; see robotHolds.
+      if (cfg.onRobot) continue;
       const day = new Date(ctx.now).getDay();
       const days = Array.isArray(cfg.days) && cfg.days.length ? cfg.days : [0, 1, 2, 3, 4, 5, 6];
       const target = targetToday(ctx.now, cfg.time);
@@ -81,6 +83,29 @@ function evaluate (rules, ctx) {
     }
   }
   return { fired, skipped };
+}
+
+// On-robot schedules start by themselves, even with this laptop off. While
+// Sweep is running it can still apply their conditions: for each run due in
+// the next few minutes whose conditions say "skip", return a hold so the
+// daemon pauses the robot's schedules (schedHold) until just after it.
+const HOLD_LEAD_MIN = 3;
+const HOLD_AFTER_MIN = 5;
+function robotHolds (rules, ctx) {
+  const holds = [];
+  for (const rule of rules) {
+    const cfg = rule.config || {};
+    if (!rule.enabled || rule.type !== 'schedule' || !cfg.onRobot) continue;
+    const days = Array.isArray(cfg.days) && cfg.days.length ? cfg.days : [0, 1, 2, 3, 4, 5, 6];
+    const target = targetToday(ctx.now, cfg.time);
+    if (target == null || !days.includes(new Date(ctx.now).getDay())) continue;
+    if (ctx.now < target - HOLD_LEAD_MIN * 60000 || ctx.now >= target) continue;
+    // "Offline" and "already cleaning" need no hold: the robot can't be
+    // reached, or won't start a second clean anyway.
+    const blocker = startBlocker(cfg, { ...ctx, connected: true, active: false });
+    if (blocker) holds.push({ rule, reason: blocker, target, until: target + HOLD_AFTER_MIN * 60000 });
+  }
+  return holds;
 }
 
 // Next time any enabled schedule rule will fire, for display.
@@ -109,8 +134,9 @@ function validate (a) {
   if (a.type === 'schedule' && parseHM(c.time) == null) throw new Error('schedule needs time as HH:MM');
   if (c.days && (!Array.isArray(c.days) || c.days.some((d) => !Number.isInteger(d) || d < 0 || d > 6))) throw new Error('days must be 0-6');
   if (c.routineId != null && typeof c.routineId !== 'string') throw new Error('routineId must be a string');
+  if (c.onRobot && a.type !== 'schedule') throw new Error('only time-based schedules can run on the robot');
   if (c.rooms && (!Array.isArray(c.rooms) || c.rooms.some((r) => typeof r !== 'string'))) throw new Error('rooms must be a list of room ids');
   return true;
 }
 
-module.exports = { evaluate, nextScheduled, inQuietHours, parseHM, validate };
+module.exports = { evaluate, robotHolds, nextScheduled, inQuietHours, parseHM, validate };

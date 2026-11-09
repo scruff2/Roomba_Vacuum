@@ -30,6 +30,7 @@ Dialog {
         minBattery.value = c.minBattery || 0;
         skipHours.value = c.skipIfCleanedWithinH || 0;
         onlyAway.checked = !!c.onlyWhenAway;
+        onRobot.checked = !!c.onRobot;
         delay.value = c.delayMin != null ? c.delayMin : 10;
         arriveAction.currentIndex = c.action === "pause" ? 1 : 0;
         rooms = c.rooms ? c.rooms.slice() : [];
@@ -51,6 +52,7 @@ Dialog {
             if (minBattery.value) config.minBattery = minBattery.value;
             if (skipHours.value) config.skipIfCleanedWithinH = skipHours.value;
             if (onlyAway.checked && type === "schedule") config.onlyWhenAway = true;
+            if (onRobot.checked && type === "schedule") config.onRobot = true;
         }
         const body = { name: nameField.text.trim(), type, enabled: rule ? rule.enabled : true, config };
         const done = (ok, d) => {
@@ -178,6 +180,22 @@ Dialog {
         }
         CheckBox { id: onlyAway; visible: typeBox.currentIndex === 0; text: qsTr("Only when nobody's home") }
         Label { visible: typeBox.currentIndex !== 2; text: qsTr("Quiet hours always block automatic starts."); color: Ui.faint; font.pixelSize: 12 }
+
+        // Store the schedule on the robot itself so it runs with this laptop off.
+        Switch {
+            id: onRobot
+            visible: typeBox.currentIndex === 0
+            Layout.topMargin: 6
+            text: qsTr("Run on the robot (works with the laptop off)")
+        }
+        Label {
+            visible: typeBox.currentIndex === 0 && onRobot.checked
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            color: Ui.faint
+            font.pixelSize: 12
+            text: qsTr("The robot keeps this schedule and starts by itself. While Sweep is running, the conditions above still apply: Sweep pauses the robot's schedule just before a run that should be skipped. With the laptop off, it always runs.")
+        }
         Label { id: error; color: Ui.bad; visible: text !== ""; Layout.fillWidth: true; wrapMode: Text.Wrap }
     }
 }

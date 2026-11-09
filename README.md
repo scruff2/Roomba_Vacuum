@@ -4,7 +4,8 @@ Local control for an iRobot Roomba (built for a j8+, "Vanilla Thunder"), with
 far more than the phone app: every mission recorded with its own stats,
 automations that know whether anyone's home, every setting the robot exposes,
 a health view of the battery, sensors and firmware, and a map of your floor
-with click-to-clean and per-mission coverage. Control is entirely local; only
+with click-to-clean and per-mission coverage. Schedules can be stored on the
+robot itself, so they run even when the laptop is off. Control is entirely local; only
 the map is read (never written) from iRobot's cloud.
 
 ```

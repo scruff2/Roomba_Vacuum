@@ -84,9 +84,16 @@ ScrollView {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
                 color: Ui.muted
-                text: page.robotSchedule && page.robotSchedule.length
-                      ? qsTr("The robot has %n schedule(s) set in the iRobot app. They run independently of Sweep's automations.", "", page.robotSchedule.length)
-                      : qsTr("No schedules are stored on the robot. Use the Automations page for smarter schedules that Sweep runs.")
+                readonly property var rs: daemon.status.robotSchedule || {}
+                text: {
+                    if (rs.entries == null) return qsTr("The robot hasn't reported its schedule yet.");
+                    const fromApp = Math.max(0, rs.entries - (rs.fromSweep || 0));
+                    let t = rs.entries === 0
+                        ? qsTr("No schedules are stored on the robot. Turn on “Run on the robot” for a schedule on the Automations page to have the robot start by itself, even with this laptop off.")
+                        : qsTr("The robot holds %n schedule(s): %1 from Sweep, %2 from the iRobot app. They run even when this laptop is off.", "", rs.entries).arg(rs.fromSweep || 0).arg(fromApp);
+                    if (rs.paused) t += " " + qsTr("Right now they're paused by Sweep, to skip a run whose conditions aren't met.");
+                    return t;
+                }
             }
         }
     }

@@ -13,7 +13,8 @@ const { Robot } = require('./robot');
 const { Store } = require('./db');
 const { MissionTracker, finalizeCounters } = require('./missions');
 const { readSettings, buildDelta } = require('./settings');
-const { evaluate, nextScheduled, inQuietHours, validate } = require('./automations');
+const { evaluate, robotHolds, nextScheduled, inQuietHours, validate } = require('./automations');
+const robotsched = require('./robotsched');
 const { Presence } = require('./presence');
 const { Alerts } = require('./alerts');
 const describe = require('./describe');
@@ -23,7 +24,7 @@ const insights = require('./insights');
 const { Cloud } = require('./cloud');
 const umf = require('./umf');
 
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 const PORT = Number(process.env.SWEEP_PORT) || 8099;
 const CONFIG = process.env.SWEEP_CONFIG || path.join(os.homedir(), '.config', 'sweep', 'config.json');
 const DB = process.env.SWEEP_DB || path.join(os.homedir(), '.local', 'share', 'sweep', 'sweep.db');
@@ -109,6 +110,7 @@ async function refreshMap ({ force = false } = {}) {
       log.info(`map ${map.name} ${map.version} loaded`);
     }
     syncRoomsFromMap(map, p.pmap_id, p.user_pmapv_id);
+    syncRobotSchedules();
     await refreshHistory();
     broadcast('map', { version: map.version });
     pushStatus();
@@ -212,6 +214,12 @@ function statusPayload () {
     countersUpdated: robot.lastFullAt || null,
     rooms: roomStore().rooms.map((r) => ({ id: rooms.roomKey(r), type: r.type, name: r.name, passes: rooms.roomPasses(r) })),
     routines: routines(),
+    robotSchedule: {
+      entries: Array.isArray(robot.state.cleanSchedule2) ? robot.state.cleanSchedule2.length : null,
+      fromSweep: store.get('robotSchedWritten', []).length,
+      paused: !!robot.state.schedHold,
+      hold: store.get('robotHold', null)
+    },
     map: cloud ? { configured: true, name: (mapData() || {}).name || null, version: (mapData() || {}).version || null, error: cloud.lastError } : { configured: false },
     warnings: safeWarnings().map((w) => ({ key: w.key, level: w.level, title: w.title })),
     maintenanceDue: maintenance.status(maintRecords(), robot.state).filter((x) => x.due).map((x) => ({ key: x.key, label: x.label }))
@@ -335,6 +343,7 @@ robot.on('update', (reported, state) => {
     const m = ev.mission;
     if (ev.type === 'start') {
       if (pendingRetryOf) { m.retryOf = pendingRetryOf; pendingRetryOf = null; }
+      if (m.initiator === 'schedule') creditRobotSchedule(m);
       // Remember which rooms were asked for, if this mission was a room clean.
       const asked = rooms.extractRooms(state.lastCommand);
       if (asked && Math.abs(asked.time * 1000 - m.start) < 5 * 60000) {
@@ -368,6 +377,30 @@ robot.on('update', (reported, state) => {
 });
 
 let offlineSince = null;
+// A mission the robot started from its own schedule: credit the matching rule.
+function creditRobotSchedule (m) {
+  const d = new Date(m.start);
+  const minute = d.getHours() * 60 + d.getMinutes();
+  for (const rule of store.automations()) {
+    const c = rule.config || {};
+    if (rule.type !== 'schedule' || !c.onRobot) continue;
+    const t = /^(\d{1,2}):(\d{2})$/.exec(c.time || '');
+    const days = Array.isArray(c.days) && c.days.length ? c.days : [0, 1, 2, 3, 4, 5, 6];
+    if (!t || !days.includes(d.getDay()) || Math.abs(Number(t[1]) * 60 + Number(t[2]) - minute) > 2) continue;
+    m.automation = { id: rule.id, name: rule.name };
+    store.markAutomationRun(rule.id, m.start);
+    record('automation', `Robot schedule “${rule.name}” started on the robot`, { ruleId: rule.id });
+    return;
+  }
+}
+
+let fullSyncTimer = null;
+robot.on('full', () => {
+  // The robot's schedule list arrives with the full state; check it soon after.
+  clearTimeout(fullSyncTimer);
+  fullSyncTimer = setTimeout(() => syncRobotSchedules(), 3000);
+});
+
 robot.on('full', () => { try { checkMaintenance(); } catch (e) { log.error('maintenance check failed:', e.message); } });
 
 robot.on('connection', (up) => {
@@ -387,6 +420,59 @@ const presence = new Presence(store, (home) => {
   pushStatus();
 });
 
+// ---------- schedules stored on the robot ----------
+// Sweep's "run on the robot" schedules live in the robot's own list
+// (cleanSchedule2), so they run even with this laptop off. The list also
+// holds the iRobot app's schedules; Sweep keeps those and replaces only the
+// entries it wrote last time.
+let syncing = null; let syncAgain = false;
+function syncRobotSchedules () {
+  if (syncing) { syncAgain = true; return syncing; }
+  syncing = (async () => {
+    if (!robot.connected || !Array.isArray(robot.state.cleanSchedule2)) return;
+    const { entries, errors } = robotsched.desiredEntries(store.automations(), roomStore(), routines());
+    for (const e of errors) record('automation', `Couldn't put a schedule on the robot: ${e.error}`, { ruleId: e.ruleId });
+    const desired = entries.map((e) => e.entry);
+    const current = robot.state.cleanSchedule2;
+    const written = store.get('robotSchedWritten', []);
+    const { list, foreign } = robotsched.merge(current, written, desired);
+    if (robotsched.same(list, current)) { store.set('robotSchedWritten', desired); return; }
+    await robot.setPreferences({ cleanSchedule2: list });
+    for (let waited = 0; waited < 10000 && !robotsched.same(robot.state.cleanSchedule2, list); waited += 250) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    if (!robotsched.same(robot.state.cleanSchedule2, list)) throw new Error('the robot did not confirm the new schedule list');
+    store.set('robotSchedWritten', desired);
+    record('automation', `Robot schedule updated: ${desired.length} from Sweep${foreign.length ? `, ${foreign.length} from the iRobot app kept` : ''}`);
+    pushStatus();
+  })().catch((e) => record('automation', `Couldn't update the robot's schedule: ${e.message}`))
+    .finally(() => { syncing = null; if (syncAgain) { syncAgain = false; syncRobotSchedules(); } });
+  return syncing;
+}
+
+// While Sweep runs, conditions still apply to robot schedules: pause the
+// robot's schedules just before a run that should be skipped, then resume.
+async function applyRobotHolds (ctx) {
+  if (!robot.connected) return;
+  const hold = store.get('robotHold', null);
+  if (hold && ctx.now >= hold.until) {
+    await robot.setPreferences({ schedHold: false });
+    store.set('robotHold', null);
+    record('automation', 'Robot schedules resumed');
+    return;
+  }
+  if (hold) return;
+  const holds = robotHolds(store.automations(), ctx);
+  if (!holds.length) return;
+  await robot.setPreferences({ schedHold: true });
+  store.set('robotHold', { until: Math.max(...holds.map((h) => h.until)), rules: holds.map((h) => h.rule.id) });
+  for (const h of holds) {
+    store.markAutomationRun(h.rule.id, ctx.now);
+    record('automation', `Skipping robot schedule “${h.rule.name}” at ${h.rule.config.time}: ${h.reason}`, { ruleId: h.rule.id });
+  }
+  pushStatus();
+}
+
 async function tick () {
   const s = robot.state; const m = s.cleanMissionStatus || {};
   const ctx = {
@@ -398,6 +484,7 @@ async function tick () {
     presence: presence.state(),
     quiet: quiet()
   };
+  await applyRobotHolds(ctx).catch((e) => log.error('robot schedule hold failed:', e.message));
   const { fired, skipped } = evaluate(store.automations(), ctx);
   for (const { rule, reason, trigger } of skipped) {
     store.markAutomationRun(rule.id, ctx.now);
@@ -546,6 +633,7 @@ route('POST', /^\/api\/routines$/, (req, body) => {
   const id = `r${Date.now().toString(36)}`;
   list.push({ id, ...r });
   store.set('routines', list);
+  syncRobotSchedules();
   record('routine', `Saved routine “${r.name}”`);
   pushStatus();
   return { id };
@@ -556,11 +644,13 @@ route('PUT', /^\/api\/routines\/([\w-]+)$/, (req, body, [id]) => {
   if (i < 0) throw Object.assign(new Error('unknown routine'), { status: 404 });
   list[i] = { id, ...rooms.validateRoutine(body, roomStore()) };
   store.set('routines', list);
+  syncRobotSchedules();
   pushStatus();
   return list[i];
 });
 route('DELETE', /^\/api\/routines\/([\w-]+)$/, (req, body, [id]) => {
   store.set('routines', routines().filter((x) => x.id !== id));
+  syncRobotSchedules();
   pushStatus();
   return { ok: true };
 });
@@ -645,10 +735,19 @@ route('GET', /^\/api\/stats$/, (req, body, m, q) => {
   };
 });
 route('GET', /^\/api\/samples$/, (req, body, m, q) => store.samples({ since: Date.now() - (Number(q.get('hours')) || 24) * 3600000 }));
+route('GET', /^\/api\/robot-schedules$/, () => {
+  const written = store.get('robotSchedWritten', []);
+  return {
+    paused: !!robot.state.schedHold,
+    hold: store.get('robotHold', null),
+    entries: (robot.state.cleanSchedule2 || []).map((e) => ({ ...e, owner: written.some((w) => robotsched.same(w, e)) ? 'sweep' : 'app' }))
+  };
+});
+route('POST', /^\/api\/robot-schedules\/sync$/, async () => { await syncRobotSchedules(); return { ok: true }; });
 route('GET', /^\/api\/automations$/, () => ({ automations: store.automations(), next: nextScheduled(store.automations(), Date.now()) }));
-route('POST', /^\/api\/automations$/, (req, body) => { validate(body); const id = store.saveAutomation({ ...body, id: undefined }); record('automation', `Added “${body.name}”`); pushStatus(); return { id }; });
-route('PUT', /^\/api\/automations\/(\d+)$/, (req, body, [id]) => { validate(body); store.saveAutomation({ ...body, id: Number(id) }); record('automation', `Updated “${body.name}”`); pushStatus(); return { id: Number(id) }; });
-route('DELETE', /^\/api\/automations\/(\d+)$/, (req, body, [id]) => { store.deleteAutomation(Number(id)); record('automation', `Deleted automation ${id}`); pushStatus(); return { ok: true }; });
+route('POST', /^\/api\/automations$/, (req, body) => { validate(body); const id = store.saveAutomation({ ...body, id: undefined }); record('automation', `Added “${body.name}”`); syncRobotSchedules(); pushStatus(); return { id }; });
+route('PUT', /^\/api\/automations\/(\d+)$/, (req, body, [id]) => { validate(body); store.saveAutomation({ ...body, id: Number(id) }); record('automation', `Updated “${body.name}”`); syncRobotSchedules(); pushStatus(); return { id: Number(id) }; });
+route('DELETE', /^\/api\/automations\/(\d+)$/, (req, body, [id]) => { store.deleteAutomation(Number(id)); record('automation', `Deleted automation ${id}`); syncRobotSchedules(); pushStatus(); return { ok: true }; });
 route('GET', /^\/api\/alerts$/, () => alerts.config());
 route('PUT', /^\/api\/alerts$/, (req, body) => alerts.update(body));
 route('GET', /^\/api\/quiet$/, () => quiet());

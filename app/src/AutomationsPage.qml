@@ -37,6 +37,7 @@ ScrollView {
         if (c.minBattery) conds.push(qsTr("battery ≥ %1%").arg(c.minBattery));
         if (c.skipIfCleanedWithinH) conds.push(qsTr("skip if cleaned in last %1 h").arg(c.skipIfCleanedWithinH));
         if (c.onlyWhenAway) conds.push(qsTr("only when nobody's home"));
+        if (c.onRobot && rule.type === "schedule") conds.push(qsTr("runs on the robot"));
         let what;
         const roomNames = (c.rooms || []).map((id) => {
             const r = (daemon.status.rooms || []).find((x) => x.id === id);

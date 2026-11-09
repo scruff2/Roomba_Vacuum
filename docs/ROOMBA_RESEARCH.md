@@ -138,9 +138,39 @@ project). Each write **replaces the whole list**; `[]` clears it. Days run
 ]}
 ```
 
-Open question: a stored room schedule names a map version, which goes stale
-(error 224) after the map changes. Schedules would need refreshing whenever
-Sweep learns a new accepted version.
+**Fire test (2026-11-08): it works, including rooms.** An enabled Kitchen
+entry for Sunday 15:45 started the robot by itself with nothing sent from
+Sweep: `lastCommand` became `{"command":"start","initiator":"schedule",
+"regions":[{"region_id":"0",...}], "user_pmapv_id":...}` and
+`cleanMissionStatus.initiator` was `schedule`. Times are the robot's local
+time (`timezone` America/Denver here); the robot's clock ran ~19 s ahead of the
+laptop. Schedules keep repeating weekly until removed.
+
+- **No tagging.** Unknown fields in an entry (e.g. `"sweep":"a1"`) are
+  silently stripped, so a controller must remember what it wrote to tell its
+  own entries from the iRobot app's (both share this list, and each write
+  replaces the whole list).
+- **Map versions go stale.** A stored room schedule names a map version, which
+  may be refused (error 224) after the map changes; rewrite room schedules
+  whenever the accepted version changes.
+- **Conditions can't be stored.** The robot only knows day, time and what to
+  clean. Conditions (skip if cleaned recently, nobody home, quiet hours) need
+  the controller: setting `schedHold` just before a run that should be
+  skipped, and clearing it afterwards, works. **Hold test (2026-11-08):** a
+  Kitchen entry for 15:57 with "skip if cleaned in the last 12 h"; Sweep set
+  `schedHold` at 15:54, the robot did not start at 15:57 (`lastCommand` stayed
+  the `ui` settings change), and Sweep cleared the hold at 16:02.
+
+**How Sweep uses this** (`daemon/robotsched.js`, `robotHolds` in
+`daemon/automations.js`): a "Run on the robot" switch on time-based
+automations writes them into `cleanSchedule2` (rooms, routines and passes
+included); Sweep's own scheduler then skips them. Sweep remembers the entries
+it wrote and keeps every other entry (the iRobot app's). It re-syncs after
+automation, routine or map-version changes and on reconnect, and missions the
+robot starts with `initiator: "schedule"` are credited to the matching
+automation. While Sweep runs, a run whose conditions fail is skipped with a
+`schedHold` from 3 minutes before to 5 minutes after it; with the laptop off,
+robot schedules always run.
 
 ## Cleaning-quality findings
 
@@ -241,10 +271,7 @@ offers rotate and mirror for other robots.
 
 ## Next experiments
 
-1. **Robot-side schedule fire test.** Store an enabled Kitchen schedule 2
-   minutes ahead; confirm the robot starts by itself and that the mission is
-   tagged with the room. If it works, add "Save to robot" for Sweep schedules
-   so they run with the laptop off. *Moves the robot.*
+1. ~~Robot-side schedule fire test~~: done, works (see above).
 2. **Decode app settings.** Watch `/api/raw` while flipping one setting at a
    time in the iRobot app (obstacle avoidance, pet-waste avoidance, edge
    cleaning, carpet behaviour) to learn `odoaMode`, `reflexSettings`,
