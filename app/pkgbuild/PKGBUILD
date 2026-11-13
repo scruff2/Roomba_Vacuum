@@ -1,4 +1,6 @@
-pkgname=sweep
+# Not "sweep": an unrelated sound editor in the AUR has that name, and AUR
+# updates (yay) would replace this app with it.
+pkgname=roomba-sweep
 pkgver=0.1.0
 pkgrel=1
 pkgdesc='Desktop control center for a Roomba: history, automations, settings and health'
@@ -6,6 +8,8 @@ arch=('x86_64' 'aarch64')
 license=('MIT')
 depends=('qt6-base' 'qt6-declarative' 'qt6-wayland')
 makedepends=('gcc' 'make')
+# Both install /usr/bin/sweep.
+conflicts=('sweep')
 source=()
 sha256sums=()
 
