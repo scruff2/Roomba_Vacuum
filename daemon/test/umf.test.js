@@ -69,3 +69,11 @@ test('SigV4 signing matches the AWS test suite (get-vanilla)', () => {
   const h = signRequest({ host: 'example.amazonaws.com', path: '/', region: 'us-east-1', service: 'service', accessKey: 'AKIDEXAMPLE', secretKey: 'wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY', now: new Date('2015-08-30T12:36:00Z') });
   assert.match(h.authorization, /Signature=5fa00fa31553b73ebf1942676e86291e8372ff2a2260956d9b8aae1d763fbf31$/);
 });
+
+test('a clean on a fresh map is flagged as lost', () => {
+  const { offMap } = require('../umf');
+  assert.strictEqual(offMap({ pmapId: 'NEW' }, 'SAVED'), true);
+  assert.strictEqual(offMap({ pmapId: 'SAVED' }, 'SAVED'), false);
+  assert.strictEqual(offMap({}, 'SAVED'), false);
+  assert.strictEqual(offMap({ pmapId: 'NEW' }, null), false);
+});

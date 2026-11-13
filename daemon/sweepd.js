@@ -125,12 +125,27 @@ async function refreshHistory () {
   const missions = store.missions({ limit: 200 });
   for (const [id, rec] of umf.matchHistory(missions, history)) {
     const m = missions.find((x) => x.id === id);
+    const flag = !m.lostMap && umf.offMap(rec, roomStore().pmapId);
     const changed = JSON.stringify(m.cloud) !== JSON.stringify(rec) || (rec.sqft && !m.sqft);
-    if (!changed) continue;
+    if (!changed && !flag) continue;
     m.cloud = rec;
     if (rec.sqft && !m.sqft) m.sqft = rec.sqft;
+    if (flag) m.lostMap = true;
     store.saveMission(m);
+    // Only speak up about recent cleans, not old history seen for the first time.
+    if (flag && Date.now() - m.start < 12 * 3600000) reportLostMap(m);
   }
+}
+
+// The robot cleaned on a brand-new map instead of the saved one: it didn't
+// recognise the house (seen in the dark, since it navigates by camera), so it
+// cleaned around wherever it was rather than the rooms it was sent to.
+function reportLostMap (m) {
+  const where = (m.rooms || []).map((r) => r.name).join(', ');
+  const at = new Date(m.start).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const what = where ? `cleaned near the dock instead of ${where}` : 'made a new map instead of using yours';
+  record('error', `The robot didn't recognise your map during the ${at} clean and ${what}. It finds its way by camera, so this usually means it was too dark: turn on the lights and try again.`, { id: m.id, pmapId: m.cloud.pmapId });
+  alerts.send('review', 'The robot got lost', `It didn't recognise your map and ${what}. Turn on the lights and try again.`, { cooldownMs: 0 });
 }
 
 async function coverageFor (missionId) {

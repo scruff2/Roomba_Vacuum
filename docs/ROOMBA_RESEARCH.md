@@ -99,6 +99,15 @@ that.
   silently: no error, no `lastCommand` echo, with either map version, after a
   robot restart too. The same command without the `null` field was accepted.
   Sweep now strips `null` fields from anything it learns from the echo.
+- **Lost robot = a fresh map per run (2026-11-08):** from 5:16 PM (after
+  sunset) every clean, including ones started from the iRobot app, was
+  recorded in the cloud's mission history under a *new* `pmap_id` with a
+  single unnamed room about 2.5 × 4.5 m around the dock, instead of the saved
+  "Main Floor". Region 3 (Breakfast Room) was requested; the robot cleaned the
+  Entrance Hallway next to the dock. Daytime cleans used the saved map. The
+  j-series navigates by camera, so darkness is the likely cause (to confirm
+  with the lights on). Sweep now flags a clean whose cloud record has a
+  different `pmap_id` and says it got lost.
 - When a clean is requested, the robot briefly reports `cycle: "clean"` while
   still in `phase: "charge"`, even if it then refuses. A clean has only
   started once `phase` is `run` (or `hm*`). The same transient report carries

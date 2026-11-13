@@ -74,7 +74,8 @@ function missionLine (m) {
     startedBy: m.initiator ? (STARTERS[m.initiator] || m.initiator) : null,
     rooms: (m.rooms || []).map((r) => r.name || r.id),
     errors: (m.errors || []).map((e) => e.text || e.code || e),
-    review: m.review ? (m.review.verdict || null) : null
+    review: m.review ? (m.review.verdict || null) : null,
+    lost: m.lostMap ? 'the robot did not recognise the map and cleaned elsewhere (usually too dark)' : undefined
   };
 }
 

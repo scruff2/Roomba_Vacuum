@@ -126,4 +126,10 @@ function matchHistory (sweepMissions, history) {
   return out;
 }
 
-module.exports = { parseMap, parseCoverage, matchHistory };
+// True when a cloud mission record ran on a different map than the saved one
+// (the robot made a fresh map because it didn't recognise the house).
+function offMap (rec, pmapId) {
+  return !!(rec && rec.pmapId && pmapId && rec.pmapId !== pmapId);
+}
+
+module.exports = { offMap, parseMap, parseCoverage, matchHistory };
